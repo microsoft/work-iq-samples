@@ -66,6 +66,8 @@ while (true)
     }
 
     if (config.Verbosity >= 1) Ink("Agent > ", ConsoleColor.Green);
+    var spinner = new Spinner();
+    spinner.Start();
     try
     {
         var msg = new AgentMessage
@@ -109,6 +111,7 @@ while (true)
                         }
 
                         var combined = string.Join("", agentMsg.Parts.OfType<TextPart>().Select(p => p.Text));
+                        spinner.Stop();
 
                         // Print text delta
                         if (combined.StartsWith(previousText, StringComparison.Ordinal))
@@ -137,6 +140,7 @@ while (true)
         {
             var response = await a2a.SendMessageAsync(new MessageSendParams { Message = msg });
             sw.Stop();
+            spinner.Stop();
             var (text, ctx, meta) = Extract(response);
             contextId = ctx;
             responseMetadata = meta;
@@ -150,6 +154,7 @@ while (true)
     }
     catch (Exception ex)
     {
+        spinner.Stop();
         Ink($"\n  ERROR: {ex.GetType().Name}: {ex.Message}\n", ConsoleColor.Red);
         if (ex.InnerException != null) Ink($"  INNER: {ex.InnerException.Message}\n", ConsoleColor.Red);
     }
@@ -472,4 +477,43 @@ class WireLog : DelegatingHandler
 
     static string Trunc(string s, int max) => s.Length <= max ? s : $"{s[..max]}...";
     static void Ink(string s, ConsoleColor c) { Console.ForegroundColor = c; Console.Write(s); Console.ResetColor(); }
+}
+
+// ── Spinner ─────────────────────────────────────────────────────────────
+
+class Spinner
+{
+    private static readonly string[] Frames = ["·  ", "·· ", "···", " ··", "  ·", "   "];
+    private CancellationTokenSource? cts;
+    private Task? task;
+
+    public void Start()
+    {
+        cts = new CancellationTokenSource();
+        var token = cts.Token;
+        task = Task.Run(async () =>
+        {
+            var i = 0;
+            Console.CursorVisible = false;
+            while (!token.IsCancellationRequested)
+            {
+                var frame = Frames[i % Frames.Length];
+                Console.Write(frame);
+                Console.SetCursorPosition(Console.CursorLeft - frame.Length, Console.CursorTop);
+                try { await Task.Delay(150, token); } catch { break; }
+                i++;
+            }
+            Console.Write("   ");
+            Console.SetCursorPosition(Console.CursorLeft - 3, Console.CursorTop);
+            Console.CursorVisible = true;
+        });
+    }
+
+    public void Stop()
+    {
+        if (cts == null) return;
+        cts.Cancel();
+        try { task?.Wait(); } catch { }
+        cts = null;
+    }
 }
