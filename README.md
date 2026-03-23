@@ -45,34 +45,6 @@ Register an app in [Azure portal](https://portal.azure.com) > Microsoft Entra ID
 
 After adding permissions, click **Grant admin consent for [your tenant]**.
 
-### 4. Service principal setup (new tenants)
-
-If you're using a newly created test tenant, the Work IQ service principals may not exist yet. You'll see an error like:
-
-```
-AADSTS650052: The app is trying to access a service '...' that your organization lacks a service principal for.
-```
-
-Fix this by creating the required service principals:
-
-```bash
-# Sign into your tenant
-az login --allow-no-subscriptions --tenant <your-tenant-id>
-
-# Create the service principals
-az ad sp create --id ba081686-5d24-4bc6-a0d6-d034ecffed87
-az ad sp create --id ea9ffc3e-8a23-4a7d-836d-234d7c7565c1
-
-# Grant admin consent
-az ad app permission admin-consent --id ba081686-5d24-4bc6-a0d6-d034ecffed87
-```
-
-Or use the admin consent URL (creates SPs and grants consent in one step):
-
-```
-https://login.microsoftonline.com/<your-tenant-id>/adminconsent?client_id=ba081686-5d24-4bc6-a0d6-d034ecffed87
-```
-
 ## Authentication
 
 Both samples support two authentication methods:
@@ -126,10 +98,8 @@ Tokens are held **in memory only** for the duration of the session. Each run req
 
 | Issue | Cause | Fix |
 |-------|-------|-----|
-| `AADSTS650052: lacks a service principal` | Service principal doesn't exist in your tenant | See [Service principal setup](#4-service-principal-setup-new-tenants) above |
-| `AADSTS65001: consent required` | Admin hasn't consented to the required permissions | Grant admin consent in Azure portal or via the admin consent URL |
+| `AADSTS65001: consent required` | Admin hasn't consented to the required permissions | Grant admin consent in Azure portal: Entra ID > App registrations > your app > API permissions > Grant admin consent |
 | `403 Forbidden` | Missing Copilot license or missing permissions | Verify the user has a Copilot license and all 7 permissions are consented |
-| `A window handle must be configured` | Running on Windows without WAM native interop | Build with `-r win-x64`: `dotnet run -r win-x64 -- ...` |
 | Empty or degraded responses | License just assigned, index not ready | Wait 15-30 minutes after license assignment for propagation |
 | `401 Unauthorized` | Token audience mismatch | Ensure token audience is `https://graph.microsoft.com` |
 
