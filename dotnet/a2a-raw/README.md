@@ -8,7 +8,7 @@ This sample **calls the agent endpoint directly** — no agent card retrieval, n
 
 Use this sample when you want to understand the A2A protocol at the HTTP level, or when you don't want to take a dependency on the [A2A .NET SDK](https://github.com/a2aproject/a2a-dotnet).
 
-> **Prerequisites, authentication setup, and common issues** are covered in the [root README](../README.md). Read that first.
+> **Prerequisites, authentication setup, and common issues** are covered in the [root README](../../README.md). Read that first.
 
 ## What's different from the `a2a/` sample?
 
