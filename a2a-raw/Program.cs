@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+//
 // WorkIQ A2A Raw Sample — Minimal A2A client using only HttpClient + JSON
 // No A2A SDK. Shows exactly what goes over the wire (JSON-RPC v0.3 format).
 //

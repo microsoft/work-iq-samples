@@ -38,41 +38,51 @@ dotnet run -- --endpoint https://graph.microsoft.com/rp/workiq/ --token eyJ0eXAi
 | `--token`, `-t` | Bearer JWT token, or `WAM` for Windows broker auth |
 | `--appid`, `-a` | App client ID (required with WAM) |
 | `--account` | Account hint (e.g., `user@contoso.com`) |
-| `--stream` | Use streaming mode (SSE via `message:stream`) |
+| `--stream` | Use streaming mode (SSE via `message/stream`) |
 
 ## What goes over the wire
 
-### Sync: `POST /message:send`
+The server uses **A2A v0.3** which is JSON-RPC based. All requests POST to the base URL with the method inside the JSON-RPC body.
 
-Request:
+### Sync: `POST` with method `message/send`
+
 ```json
 {
-  "message": {
-    "messageId": "guid",
-    "role": "user",
-    "parts": [{ "kind": "text", "text": "What meetings do I have today?" }],
-    "contextId": null,
-    "metadata": { "Location": { "timeZoneOffset": -480, "timeZone": "America/Los_Angeles" } }
-  },
-  "configuration": {
-    "acceptedOutputModes": ["text/plain", "application/json"]
+  "jsonrpc": "2.0",
+  "id": "unique-request-id",
+  "method": "message/send",
+  "params": {
+    "message": {
+      "kind": "message",
+      "role": "user",
+      "messageId": "guid",
+      "parts": [{ "kind": "text", "text": "What meetings do I have today?" }],
+      "contextId": null,
+      "metadata": { "Location": { "timeZoneOffset": -480, "timeZone": "America/Los_Angeles" } }
+    }
   }
 }
 ```
 
-Response: JSON with `parts` containing `TextPart` responses and `contextId` for multi-turn.
+Response is a JSON-RPC response with `result` containing the agent's message and `contextId` for multi-turn.
 
-### Streaming: `POST /message:stream`
+### Streaming: `POST` with method `message/stream`
 
-Same request body. Response is `text/event-stream` (SSE):
+Same JSON-RPC request with `"method": "message/stream"`. Response is `text/event-stream` (SSE) where each event is a JSON-RPC response:
 
 ```
-data: {"status":{"state":"working","message":{"parts":[{"kind":"text","text":"You"}]}},"contextId":"ctx-1"}
-data: {"status":{"state":"working","message":{"parts":[{"kind":"text","text":"You have"}]}},"contextId":"ctx-1"}
-data: {"status":{"state":"completed","message":{"parts":[{"kind":"text","text":"You have 3 meetings..."}]}},"contextId":"ctx-1"}
+data: {"jsonrpc":"2.0","id":"...","result":{"status":{"state":"working","message":{"parts":[{"kind":"text","text":"You"}]}},"contextId":"ctx-1"}}
+data: {"jsonrpc":"2.0","id":"...","result":{"status":{"state":"working","message":{"parts":[{"kind":"text","text":"You have"}]}},"contextId":"ctx-1"}}
+data: {"jsonrpc":"2.0","id":"...","result":{"status":{"state":"completed","message":{"parts":[{"kind":"text","text":"You have 3 meetings..."}]}},"contextId":"ctx-1"}}
 ```
 
-Each `data:` line is a complete JSON object. Text accumulates (not incremental deltas). The sample diffs against the previous text to print only new content.
+Text accumulates across events (not incremental deltas). The sample diffs against the previous text to print only new content.
+
+### Key v0.3 protocol details
+
+- **JSON-RPC envelope required**: Every request must include `jsonrpc`, `id`, `method`, `params`
+- **POST to base URL**: The method (`message/send`, `message/stream`) is inside the body, not in the URL path
+- **`kind` discriminators required**: Messages need `"kind": "message"`, parts need `"kind": "text"` — server rejects without these
 
 ## NuGet dependencies
 
