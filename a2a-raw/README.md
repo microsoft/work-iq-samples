@@ -1,0 +1,89 @@
+# Work IQ A2A Raw Sample
+
+A bare-minimum A2A client using only `HttpClient` and `System.Text.Json` — **no A2A SDK**. Shows exactly what goes over the wire when talking to a Work IQ agent.
+
+Use this sample when you want to understand the A2A protocol at the HTTP level, or when you don't want to take a dependency on the [A2A .NET SDK](https://github.com/a2aproject/a2a-dotnet).
+
+> **Prerequisites, authentication setup, and common issues** are covered in the [root README](../README.md). Read that first.
+
+## What's different from the `a2a/` sample?
+
+| | `a2a/` (SDK) | `a2a-raw/` (this sample) |
+|--|-------------|--------------------------|
+| **Dependencies** | A2A NuGet SDK + MSAL | MSAL only |
+| **Protocol handling** | SDK manages JSON-RPC, SSE parsing, types | Raw `HttpClient` + `JsonDocument` |
+| **Lines of code** | ~480 | ~280 |
+| **Best for** | Production apps, full A2A features | Learning, debugging, minimal integration |
+
+## Quick start
+
+```bash
+dotnet build
+
+# Sync mode
+dotnet run -- --endpoint https://graph.microsoft.com/rp/workiq/ --token WAM --appid <your-app-id>
+
+# Streaming mode (SSE)
+dotnet run -- --endpoint https://graph.microsoft.com/rp/workiq/ --token WAM --appid <your-app-id> --stream
+
+# With a pre-obtained token
+dotnet run -- --endpoint https://graph.microsoft.com/rp/workiq/ --token eyJ0eXAi...
+```
+
+## Parameters
+
+| Flag | Description |
+|------|-------------|
+| `--endpoint`, `-e` | Agent URL (required) |
+| `--token`, `-t` | Bearer JWT token, or `WAM` for Windows broker auth |
+| `--appid`, `-a` | App client ID (required with WAM) |
+| `--account` | Account hint (e.g., `user@contoso.com`) |
+| `--stream` | Use streaming mode (SSE via `message:stream`) |
+
+## What goes over the wire
+
+### Sync: `POST /message:send`
+
+Request:
+```json
+{
+  "message": {
+    "messageId": "guid",
+    "role": "user",
+    "parts": [{ "kind": "text", "text": "What meetings do I have today?" }],
+    "contextId": null,
+    "metadata": { "Location": { "timeZoneOffset": -480, "timeZone": "America/Los_Angeles" } }
+  },
+  "configuration": {
+    "acceptedOutputModes": ["text/plain", "application/json"]
+  }
+}
+```
+
+Response: JSON with `parts` containing `TextPart` responses and `contextId` for multi-turn.
+
+### Streaming: `POST /message:stream`
+
+Same request body. Response is `text/event-stream` (SSE):
+
+```
+data: {"status":{"state":"working","message":{"parts":[{"kind":"text","text":"You"}]}},"contextId":"ctx-1"}
+data: {"status":{"state":"working","message":{"parts":[{"kind":"text","text":"You have"}]}},"contextId":"ctx-1"}
+data: {"status":{"state":"completed","message":{"parts":[{"kind":"text","text":"You have 3 meetings..."}]}},"contextId":"ctx-1"}
+```
+
+Each `data:` line is a complete JSON object. Text accumulates (not incremental deltas). The sample diffs against the previous text to print only new content.
+
+## NuGet dependencies
+
+| Package | Purpose |
+|---------|---------|
+| `Microsoft.Identity.Client` | MSAL token acquisition |
+| `Microsoft.Identity.Client.Broker` | Windows WAM broker |
+
+That's it — no A2A SDK, no JWT decoder, no Graph SDK.
+
+## Resources
+
+- [A2A Protocol Specification](https://a2a-protocol.org/latest/specification/)
+- [Work IQ Overview](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/workiq-overview)
