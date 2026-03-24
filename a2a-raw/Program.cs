@@ -1,6 +1,5 @@
 // WorkIQ A2A Raw Sample — Minimal A2A client using only HttpClient + JSON
-// No A2A SDK, no NuGet dependencies beyond MSAL for auth.
-// Shows exactly what goes over the wire when talking to a Work IQ agent.
+// No A2A SDK. Shows exactly what goes over the wire (JSON-RPC v0.3 format).
 //
 // Usage:
 //   dotnet run -- --endpoint <agent-url> --token WAM --appid <client-id> [--account user@tenant.com] [--stream]
@@ -71,7 +70,7 @@ http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("appli
 string? contextId = null;
 
 Console.WriteLine($"Connected to: {endpoint}");
-Console.WriteLine($"Mode: {(stream ? "streaming (message:stream)" : "sync (message:send)")}");
+Console.WriteLine($"Mode: {(stream ? "streaming (message/stream)" : "sync (message/send)")}");
 Console.WriteLine("Type a message. 'quit' to exit.\n");
 
 // ── Chat loop ────────────────────────────────────────────────────────────
@@ -102,42 +101,66 @@ while (true)
     Console.Write("Agent > ");
     Console.ResetColor();
 
+    // Show a simple progress indicator while waiting
+    Console.CursorVisible = false;
+    var spinnerCts = new CancellationTokenSource();
+    var spinnerTask = Task.Run(async () =>
+    {
+        var frames = new[] { ".  ", ".. ", "..." , " ..", "  .", "   " };
+        var i = 0;
+        while (!spinnerCts.Token.IsCancellationRequested)
+        {
+            var f = frames[i++ % frames.Length];
+            Console.Write(f);
+            Console.SetCursorPosition(Console.CursorLeft - f.Length, Console.CursorTop);
+            try { await Task.Delay(150, spinnerCts.Token); } catch { break; }
+        }
+        Console.Write("   ");
+        Console.SetCursorPosition(Console.CursorLeft - 3, Console.CursorTop);
+        Console.CursorVisible = true;
+    });
+
     try
     {
-        // Build the A2A JSON-RPC request — this is ALL you need
-        var request = new
+        // Build the A2A message (v0.3 format — requires "kind" discriminators)
+        var message = new Dictionary<string, object?>
         {
-            message = new
+            ["kind"] = "message",
+            ["role"] = "user",
+            ["messageId"] = Guid.NewGuid().ToString(),
+            ["contextId"] = contextId,
+            ["parts"] = new object[] { new { kind = "text", text = input } },
+            ["metadata"] = new Dictionary<string, object>
             {
-                messageId = Guid.NewGuid().ToString(),
-                role = "user",
-                parts = new object[] { new { kind = "text", text = input } },
-                contextId,
-                metadata = new Dictionary<string, object>
-                {
-                    ["Location"] = new { timeZoneOffset = (int)TimeZoneInfo.Local.BaseUtcOffset.TotalMinutes, timeZone = TimeZoneInfo.Local.Id },
-                },
-            },
-            configuration = new
-            {
-                acceptedOutputModes = new[] { "text/plain", "application/json" },
+                ["Location"] = new { timeZoneOffset = (int)TimeZoneInfo.Local.BaseUtcOffset.TotalMinutes, timeZone = TimeZoneInfo.Local.Id },
             },
         };
 
-        var json = JsonSerializer.Serialize(request);
+        // Wrap in JSON-RPC envelope — v0.3 sends method inside the body, POSTs to base URL
+        var jsonRpcRequest = new
+        {
+            jsonrpc = "2.0",
+            id = Guid.NewGuid().ToString(),
+            method = stream ? "message/stream" : "message/send",
+            @params = new { message },
+        };
+
+        var json = JsonSerializer.Serialize(jsonRpcRequest);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
         if (stream)
         {
-            await StreamResponse(http, endpoint, content);
+            await StreamResponse(http, endpoint, content, spinnerCts, spinnerTask);
         }
         else
         {
-            await SyncResponse(http, endpoint, content);
+            await SyncResponse(http, endpoint, content, spinnerCts, spinnerTask);
         }
     }
     catch (Exception ex)
     {
+        spinnerCts.Cancel();
+        try { await spinnerTask; } catch { }
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine($"\n  ERROR: {ex.Message}");
         Console.ResetColor();
@@ -146,12 +169,16 @@ while (true)
     Console.WriteLine();
 }
 
-// ── Sync: POST /message:send ─────────────────────────────────────────────
+// ── Sync: POST to base URL with method "message/send" ────────────────────
 
-async Task SyncResponse(HttpClient client, string ep, HttpContent body)
+async Task SyncResponse(HttpClient client, string ep, HttpContent body, CancellationTokenSource spinCts, Task spinTask)
 {
-    var url = ep.TrimEnd('/') + "/message:send";
-    var res = await client.PostAsync(url, body);
+    // v0.3: POST to the base URL (not /message:send) — method is inside the JSON-RPC body
+    var res = await client.PostAsync(ep, body);
+
+    // Stop spinner now that we have a response
+    spinCts.Cancel();
+    try { await spinTask; } catch { }
 
     Console.ForegroundColor = ConsoleColor.DarkGray;
     Console.WriteLine($"  [{(int)res.StatusCode} {res.ReasonPhrase}]");
@@ -167,29 +194,57 @@ async Task SyncResponse(HttpClient client, string ep, HttpContent body)
         return;
     }
 
+    if (string.IsNullOrWhiteSpace(responseBody))
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("  (empty response body)");
+        Console.ResetColor();
+        return;
+    }
+
+    // Parse JSON-RPC response: { "jsonrpc": "2.0", "id": "...", "result": { ... } }
     using var doc = JsonDocument.Parse(responseBody);
 
-    // Extract contextId for multi-turn
-    if (doc.RootElement.TryGetProperty("contextId", out var ctx))
-        contextId = ctx.GetString();
-    else if (doc.RootElement.TryGetProperty("result", out var result) &&
-             result.TryGetProperty("contextId", out var rCtx))
-        contextId = rCtx.GetString();
+    if (doc.RootElement.TryGetProperty("error", out var err))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"  JSON-RPC error: {err}");
+        Console.ResetColor();
+        return;
+    }
 
-    // Extract text from response
-    var text = ExtractText(doc.RootElement);
-    Console.WriteLine(text);
+    if (doc.RootElement.TryGetProperty("result", out var result))
+    {
+        // Extract contextId for multi-turn
+        if (result.TryGetProperty("contextId", out var ctx))
+            contextId = ctx.GetString();
+        else if (result.TryGetProperty("status", out var status) &&
+                 status.TryGetProperty("message", out var msg) &&
+                 msg.TryGetProperty("contextId", out var sCtx))
+            contextId = sCtx.GetString();
+
+        var text = ExtractText(result);
+        Console.WriteLine(text);
+    }
+    else
+    {
+        Console.WriteLine(responseBody);
+    }
 }
 
-// ── Streaming: POST /message:stream (SSE) ────────────────────────────────
+// ── Streaming: POST to base URL with method "message/stream" (SSE) ───────
 
-async Task StreamResponse(HttpClient client, string ep, HttpContent body)
+async Task StreamResponse(HttpClient client, string ep, HttpContent body, CancellationTokenSource spinCts, Task spinTask)
 {
-    var url = ep.TrimEnd('/') + "/message:stream";
-    var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = body };
+    // v0.3: POST to the base URL — method is inside the JSON-RPC body
+    var request = new HttpRequestMessage(HttpMethod.Post, ep) { Content = body };
     request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
 
     var res = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+
+    // Stop spinner now that we have a response
+    spinCts.Cancel();
+    try { await spinTask; } catch { }
 
     Console.ForegroundColor = ConsoleColor.DarkGray;
     Console.WriteLine($"  [{(int)res.StatusCode} {res.ReasonPhrase}]");
@@ -214,7 +269,7 @@ async Task StreamResponse(HttpClient client, string ep, HttpContent body)
         var line = await reader.ReadLineAsync();
         if (line == null) break;
 
-        // SSE format: lines starting with "data:" contain JSON
+        // SSE format: lines starting with "data:" contain JSON-RPC responses
         if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
         var data = line["data:".Length..].Trim();
         if (string.IsNullOrEmpty(data)) continue;
@@ -223,12 +278,23 @@ async Task StreamResponse(HttpClient client, string ep, HttpContent body)
         {
             using var doc = JsonDocument.Parse(data);
 
+            // Unwrap JSON-RPC: get the "result" field
+            JsonElement payload;
+            if (doc.RootElement.TryGetProperty("result", out var result))
+                payload = result;
+            else
+                payload = doc.RootElement;
+
             // Extract contextId
-            if (doc.RootElement.TryGetProperty("contextId", out var ctx))
+            if (payload.TryGetProperty("contextId", out var ctx))
                 contextId = ctx.GetString();
+            else if (payload.TryGetProperty("status", out var st) &&
+                     st.TryGetProperty("message", out var m) &&
+                     m.TryGetProperty("contextId", out var sCtx))
+                contextId = sCtx.GetString();
 
             // Extract and print text delta
-            var fullText = ExtractText(doc.RootElement);
+            var fullText = ExtractText(payload);
             if (fullText.StartsWith(previousText, StringComparison.Ordinal))
             {
                 Console.Write(fullText[previousText.Length..]);
@@ -248,26 +314,21 @@ async Task StreamResponse(HttpClient client, string ep, HttpContent body)
 
 // ── Extract text from A2A response ───────────────────────────────────────
 
-string ExtractText(JsonElement root)
+string ExtractText(JsonElement el)
 {
-    // A2A responses can be wrapped in different shapes depending on the server.
-    // Try common paths: root.parts, root.result.status.message.parts, root.status.message.parts
+    // Try direct parts
+    if (TryGetParts(el, out var text)) return text;
 
-    if (TryGetParts(root, out var text)) return text;
+    // Try result.status.message.parts (task response)
+    if (el.TryGetProperty("status", out var status) &&
+        status.TryGetProperty("message", out var msg) &&
+        TryGetParts(msg, out text)) return text;
 
-    if (root.TryGetProperty("result", out var result))
-    {
-        if (TryGetParts(result, out text)) return text;
-        if (result.TryGetProperty("status", out var status) &&
-            status.TryGetProperty("message", out var msg) &&
-            TryGetParts(msg, out text)) return text;
-    }
-
-    if (root.TryGetProperty("status", out var s) &&
-        s.TryGetProperty("message", out var m) &&
+    // Try result.message.parts
+    if (el.TryGetProperty("message", out var m) &&
         TryGetParts(m, out text)) return text;
 
-    return root.ToString();
+    return "";
 }
 
 bool TryGetParts(JsonElement el, out string text)
@@ -341,7 +402,7 @@ static IntPtr ConsoleWindowHandle() { var c = GetConsoleWindow(); var r = GetAnc
 void PrintUsage()
 {
     Console.WriteLine("""
-    Work IQ A2A Raw Sample — minimal A2A client, no SDK
+    Work IQ A2A Raw Sample — minimal A2A client, no SDK (JSON-RPC v0.3 wire format)
 
     Usage:
       dotnet run -- --endpoint <url> --token <JWT|WAM> [options]
@@ -353,7 +414,7 @@ void PrintUsage()
     Options:
       --appid, -a      App client ID (required with WAM)
       --account        Account hint (e.g., user@contoso.com)
-      --stream         Use streaming mode (SSE via message:stream)
+      --stream         Use streaming mode (SSE via message/stream)
 
     Examples:
       dotnet run -- -e https://graph.microsoft.com/rp/workiq/ -t WAM -a <appid>
