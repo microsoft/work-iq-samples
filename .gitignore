@@ -416,3 +416,12 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Rust build output
+rust/target/
+
+# OS
+.DS_Store
+
+# Claude
+.claude/
