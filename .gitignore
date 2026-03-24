@@ -416,3 +416,14 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+
+# OS
+.DS_Store
+
+# Claude
+.claude/
