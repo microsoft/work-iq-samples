@@ -2,6 +2,8 @@
 
 A bare-minimum A2A client using only `HttpClient` and `System.Text.Json` — **no A2A SDK**. Shows exactly what goes over the wire when talking to a Work IQ agent.
 
+This sample **calls the agent endpoint directly** — no agent card retrieval, no agent discovery, no capability negotiation. It assumes you know the agent's URL and sends messages to it. The default endpoint targets the **Microsoft 365 Copilot** agent via Graph RP.
+
 Use this sample when you want to understand the A2A protocol at the HTTP level, or when you don't want to take a dependency on the [A2A .NET SDK](https://github.com/a2aproject/a2a-dotnet).
 
 > **Prerequisites, authentication setup, and common issues** are covered in the [root README](../README.md). Read that first.
