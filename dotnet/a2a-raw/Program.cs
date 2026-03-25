@@ -183,9 +183,7 @@ async Task SyncResponse(HttpClient client, string ep, HttpContent body, Cancella
     spinCts.Cancel();
     try { await spinTask; } catch { }
 
-    Console.ForegroundColor = ConsoleColor.DarkGray;
-    Console.WriteLine($"  [{(int)res.StatusCode} {res.ReasonPhrase}]");
-    Console.ResetColor();
+    PrintResponseHeaders(res);
 
     var responseBody = await res.Content.ReadAsStringAsync();
 
@@ -249,9 +247,7 @@ async Task StreamResponse(HttpClient client, string ep, HttpContent body, Cancel
     spinCts.Cancel();
     try { await spinTask; } catch { }
 
-    Console.ForegroundColor = ConsoleColor.DarkGray;
-    Console.WriteLine($"  [{(int)res.StatusCode} {res.ReasonPhrase}]");
-    Console.ResetColor();
+    PrintResponseHeaders(res);
 
     if (!res.IsSuccessStatusCode)
     {
@@ -394,6 +390,26 @@ async Task<(string token, IPublicClientApplication app, IAccount? account)> Acqu
     }
 
     return (result.AccessToken, app, result.Account);
+}
+
+// ── Response headers ─────────────────────────────────────────────────────
+
+void PrintResponseHeaders(HttpResponseMessage res)
+{
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.WriteLine($"  [{(int)res.StatusCode} {res.ReasonPhrase}]");
+
+    // Print diagnostic headers useful for troubleshooting
+    string[] diagnosticHeaders = ["request-id", "client-request-id", "x-ms-ags-diagnostic", "Date"];
+    foreach (var name in diagnosticHeaders)
+    {
+        if (res.Headers.TryGetValues(name, out var values))
+        {
+            Console.WriteLine($"  {name}: {string.Join(", ", values)}");
+        }
+    }
+
+    Console.ResetColor();
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
