@@ -38,7 +38,8 @@ if (config.Verbosity >= 1)
     if (config.ShowToken) Console.WriteLine($"\n  {token}\n");
 }
 
-var httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+var httpClient = new HttpClient(new DiagnosticHandler { InnerHandler = new HttpClientHandler() }) { Timeout = TimeSpan.FromMinutes(5) };
+DiagnosticHandler.Verbosity = config.Verbosity;
 httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 foreach (var h in config.Headers)
 {
@@ -479,3 +480,32 @@ static string Trunc(string s, int max) => s.Length <= max ? s : $"{s[..max]}..."
 static IntPtr ConsoleWindowHandle() { var c = Win32GetConsoleWindow(); var r = GetAncestor(c, 3); return r != IntPtr.Zero ? r : c; }
 
 record Config(string Token, string AppId, string? Account, bool Stream, bool ShowToken, int Verbosity, List<string> Headers);
+
+// ── Diagnostic handler ──────────────────────────────────────────────────
+
+class DiagnosticHandler : DelegatingHandler
+{
+    public static int Verbosity { get; set; } = 1;
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage req, CancellationToken ct)
+    {
+        var res = await base.SendAsync(req, ct);
+
+        if (Verbosity >= 2)
+        {
+            // Full wire logging handled by LogWire at call sites
+        }
+        else if (Verbosity >= 1)
+        {
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            foreach (var name in new[] { "request-id", "x-ms-ags-diagnostic" })
+            {
+                if (res.Headers.TryGetValues(name, out var values))
+                    Console.WriteLine($"  {name}: {string.Join(", ", values)}");
+            }
+            Console.ResetColor();
+        }
+
+        return res;
+    }
+}
