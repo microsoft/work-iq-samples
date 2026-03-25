@@ -21,7 +21,7 @@ using Microsoft.Identity.Client.Broker;
 // ── Parse args ──────────────────────────────────────────────────────────
 
 string? endpoint = null, token = null, appId = null, account = null;
-bool stream = false;
+bool stream = false, allHeaders = false;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -32,6 +32,7 @@ for (int i = 0; i < args.Length; i++)
         case "--appid" or "-a": appId = args[++i]; break;
         case "--account": account = args[++i]; break;
         case "--stream": stream = true; break;
+        case "--all-headers": allHeaders = true; break;
         default:
             Console.Error.WriteLine($"Unknown flag: {args[i]}");
             PrintUsage();
@@ -399,13 +400,25 @@ void PrintResponseHeaders(HttpResponseMessage res)
     Console.ForegroundColor = ConsoleColor.DarkGray;
     Console.WriteLine($"  [{(int)res.StatusCode} {res.ReasonPhrase}]");
 
-    // Print diagnostic headers useful for troubleshooting
-    string[] diagnosticHeaders = ["request-id", "client-request-id", "x-ms-ags-diagnostic", "Date"];
-    foreach (var name in diagnosticHeaders)
+    if (allHeaders)
     {
-        if (res.Headers.TryGetValues(name, out var values))
+        // Print all response headers + content headers
+        foreach (var h in res.Headers)
+            Console.WriteLine($"  {h.Key}: {string.Join(", ", h.Value)}");
+        if (res.Content != null)
+            foreach (var h in res.Content.Headers)
+                Console.WriteLine($"  {h.Key}: {string.Join(", ", h.Value)}");
+    }
+    else
+    {
+        // Print key diagnostic headers only
+        string[] diagnosticHeaders = ["request-id", "client-request-id", "x-ms-ags-diagnostic", "Date"];
+        foreach (var name in diagnosticHeaders)
         {
-            Console.WriteLine($"  {name}: {string.Join(", ", values)}");
+            if (res.Headers.TryGetValues(name, out var values))
+            {
+                Console.WriteLine($"  {name}: {string.Join(", ", values)}");
+            }
         }
     }
 
@@ -434,6 +447,7 @@ void PrintUsage()
       --appid, -a      App client ID (required with WAM)
       --account        Account hint (e.g., user@contoso.com)
       --stream         Use streaming mode (SSE via message/stream)
+      --all-headers    Print all response headers (default: key diagnostics only)
 
     Examples:
       dotnet run -- -e https://graph.microsoft.com/rp/workiq/ -t WAM -a <appid>
