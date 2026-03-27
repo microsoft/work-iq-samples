@@ -46,9 +46,15 @@ Both scripts will:
    - `User.Read`, `Sites.Read.All`, `Mail.Read`, `People.Read.All`
    - `OnlineMeetingTranscript.Read.All`, `Chat.Read`, `ChannelMessage.Read.All`, `ExternalItem.Read.All`
 4. Grant admin consent
-5. Print the **App (client) ID**
+5. Generate `A2A Chat/Configuration.plist` with your App (client) ID
 
-Update the `clientId` constant in `A2A Chat/Services/AuthService.swift` with the printed App ID.
+### Manual setup
+
+If you prefer to configure the app manually (or already have an app registration):
+
+1. Copy `A2A Chat/Configuration.example.plist` to `A2A Chat/Configuration.plist`
+2. Replace `YOUR_APP_CLIENT_ID` with your Azure AD App (client) ID
+3. `Configuration.plist` is git-ignored so your client ID stays out of source control
 
 ## Build & Run
 

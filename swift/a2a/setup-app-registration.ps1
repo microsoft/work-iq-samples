@@ -60,8 +60,27 @@ az rest --method POST `
     -o none
 
 Write-Host ""
+Write-Host "── Generating Configuration.plist ──"
+
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$PlistPath = Join-Path $ScriptDir "A2A Chat/Configuration.plist"
+$PlistContent = @"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>ClientId</key>
+    <string>$AppId</string>
+</dict>
+</plist>
+"@
+Set-Content -Path $PlistPath -Value $PlistContent -Encoding UTF8
+
+Write-Host "   Created: A2A Chat/Configuration.plist"
+
+Write-Host ""
 Write-Host "── Done ──"
 Write-Host "App ID: $AppId"
 Write-Host "Redirect URI: $RedirectUri"
 Write-Host ""
-Write-Host "Update AuthService.swift with this App ID."
+Write-Host "Configuration.plist created. Build and run in Xcode."
