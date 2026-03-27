@@ -358,7 +358,7 @@ impl AuthManager {
 
 // ── JWT Helpers ──────────────────────────────────────────────────────────
 
-/// Decode and display JWT token claims (header + payload) without verification.
+/// Decode and display key JWT claims (matching .NET CLI output format).
 pub fn decode_token(token: &str) {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
@@ -366,28 +366,36 @@ pub fn decode_token(token: &str) {
         return;
     }
 
-    if let Ok(header) = decode_jwt_part(parts[0]) {
-        println!("  {}", "Header:".dimmed());
-        print_json_pretty(&header, "    ");
+    let payload = match decode_jwt_part(parts[1]) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("  {} {}", "decode failed:".red(), e);
+            return;
+        }
+    };
+
+    // Show focused claims matching the .NET CLI
+    for claim in &["aud", "appid", "app_displayname", "tid", "upn", "name", "scp"] {
+        if let Some(val) = payload.get(claim).and_then(|v| v.as_str()) {
+            if !val.is_empty() {
+                println!("  {:<16} {}", claim, val);
+            }
+        }
     }
 
-    if let Ok(payload) = decode_jwt_part(parts[1]) {
-        println!("  {}", "Payload:".dimmed());
-        print_json_pretty(&payload, "    ");
-
-        if let Some(exp) = payload.get("exp").and_then(|v| v.as_i64()) {
-            let now = chrono::Utc::now().timestamp();
-            let remaining = exp - now;
-            if remaining > 0 {
-                println!(
-                    "  {} {}m {}s",
-                    "Expires in:".dimmed(),
-                    remaining / 60,
-                    remaining % 60
-                );
+    // Show expiry with color coding
+    if let Some(exp) = payload.get("exp").and_then(|v| v.as_i64()) {
+        let now = chrono::Utc::now().timestamp();
+        let remaining = exp - now;
+        if remaining > 0 {
+            let time_str = format!("{}m", remaining / 60);
+            if remaining < 300 {
+                println!("  {:<16} {}", "expires", time_str.red());
             } else {
-                println!("  {}", "TOKEN EXPIRED".red().bold());
+                println!("  {:<16} {}", "expires", time_str);
             }
+        } else {
+            println!("  {:<16} {}", "expires", "EXPIRED".red().bold());
         }
     }
 }
@@ -412,25 +420,6 @@ fn decode_jwt_part(part: &str) -> Result<serde_json::Value> {
         .decode(part.trim_end_matches('='))
         .context("base64 decode")?;
     serde_json::from_slice(&decoded).context("JSON parse")
-}
-
-fn print_json_pretty(val: &serde_json::Value, indent: &str) {
-    if let Some(obj) = val.as_object() {
-        for (k, v) in obj {
-            let v_str = match v {
-                serde_json::Value::String(s) => {
-                    if s.len() > 80 {
-                        let truncated: String = s.chars().take(80).collect();
-                        format!("{truncated}...")
-                    } else {
-                        s.clone()
-                    }
-                }
-                other => other.to_string(),
-            };
-            println!("{}{}: {}", indent, k.cyan(), v_str);
-        }
-    }
 }
 
 // ── OAuth2 Response Types ───────────────────────────────────────────────

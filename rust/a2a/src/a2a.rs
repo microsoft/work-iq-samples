@@ -16,7 +16,8 @@ pub struct WorkIQClient {
 }
 
 impl WorkIQClient {
-    pub fn new(endpoint: &str, token: &str, extra_headers: &[(&str, &str)]) -> Result<Self> {
+    /// Create a new client. `extra_headers` are "Key: Value" strings (matching --header/-H).
+    pub fn new(endpoint: &str, token: &str, extra_headers: &[String]) -> Result<Self> {
         let http_client = build_http_client(extra_headers)?;
         let client = A2aClient::new(ClientConfig {
             server_url: endpoint.to_string(),
@@ -60,11 +61,14 @@ impl WorkIQClient {
     }
 }
 
-fn build_http_client(extra_headers: &[(&str, &str)]) -> Result<reqwest::Client> {
+fn build_http_client(extra_headers: &[String]) -> Result<reqwest::Client> {
     let mut headers = HeaderMap::new();
-    for (k, v) in extra_headers {
-        let name: HeaderName = k.parse()?;
-        let val = HeaderValue::from_str(v)?;
+    for h in extra_headers {
+        let (k, v) = h
+            .split_once(':')
+            .ok_or_else(|| anyhow::anyhow!("Invalid header (expected 'Key: Value'): {h}"))?;
+        let name: HeaderName = k.trim().parse()?;
+        let val = HeaderValue::from_str(v.trim())?;
         headers.insert(name, val);
     }
     Ok(reqwest::Client::builder()

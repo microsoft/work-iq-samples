@@ -2506,6 +2506,7 @@ dependencies = [
  "colored",
  "dirs",
  "futures-util",
+ "iana-time-zone",
  "reqwest",
  "serde",
  "serde_json",
