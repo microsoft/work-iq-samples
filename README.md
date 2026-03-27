@@ -6,8 +6,9 @@ Sample clients for the [Work IQ](https://learn.microsoft.com/en-us/microsoft-365
 |--------|----------|-------------|
 | [**a2a/**](a2a/) | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | Interactive agent session using the open A2A protocol over JSON-RPC |
 | [**rest/**](rest/) | REST | Interactive chat using the [Copilot Chat API](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview) with sync and streaming modes |
+| [**swift/a2a/**](swift/a2a/) | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | SwiftUI iOS/iPadOS chat app using A2A v0.3 with streaming responses |
 
-Both samples are single-file, minimal-dependency .NET console apps designed to be read, modified, and used as starting points for your own integration.
+The .NET samples (`a2a/`, `rest/`) are single-file, minimal-dependency console apps designed to be read, modified, and used as starting points for your own integration. The Swift sample (`swift/a2a/`) is a native iOS/iPadOS app.
 
 > **Current state**: Work IQ is accessed through the Microsoft Graph API at `graph.microsoft.com`. All samples use Graph endpoints and Graph authentication today.
 >

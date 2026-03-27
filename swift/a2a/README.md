@@ -82,4 +82,4 @@ A2A Chat/
 
 ## License
 
-[MIT](../LICENSE)
+[MIT](../../LICENSE)
