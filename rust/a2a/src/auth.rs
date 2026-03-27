@@ -109,11 +109,23 @@ impl AuthManager {
         // 1. Cached and still fresh (>60s remaining)
         if let Some(ref cache) = self.cache {
             if !cache.expires_within(60) {
-                if verbosity >= 2 {
-                    eprintln!("  {}", "Using cached access token".dimmed());
+                if verbosity >= 1 {
+                    eprintln!(
+                        "  {}",
+                        format!(
+                            "Using cached token ({})",
+                            cache.account.as_deref().unwrap_or("unknown")
+                        )
+                        .dimmed()
+                    );
                 }
                 return Ok(cache.access_token.clone());
             }
+            if verbosity >= 1 {
+                eprintln!("  {}", "Cached token expired or expiring soon".dimmed());
+            }
+        } else if verbosity >= 1 {
+            eprintln!("  {}", "No cached token found".dimmed());
         }
 
         // 2. Try silent refresh
@@ -138,6 +150,8 @@ impl AuthManager {
                     // Fall through to device code
                 }
             }
+        } else if verbosity >= 1 {
+            eprintln!("  {}", "No refresh token available".dimmed());
         }
 
         // 3. Device code flow
@@ -194,6 +208,12 @@ impl AuthManager {
     async fn refresh_token(&mut self, refresh_token: &str) -> Result<TokenCache> {
         let token_url = format!("{}/oauth2/v2.0/token", self.authority);
         let scope = self.scopes.join(" ");
+        // Include offline_access so the server returns a new refresh token
+        let scope_with_offline = if scope.contains("offline_access") {
+            scope
+        } else {
+            format!("{scope} offline_access")
+        };
 
         let resp = self
             .http
@@ -202,7 +222,7 @@ impl AuthManager {
                 ("client_id", self.client_id.as_str()),
                 ("grant_type", "refresh_token"),
                 ("refresh_token", refresh_token),
-                ("scope", &scope),
+                ("scope", &scope_with_offline),
             ])
             .send()
             .await?;
@@ -293,13 +313,17 @@ impl AuthManager {
         let deadline =
             tokio::time::Instant::now() + std::time::Duration::from_secs(dc_resp.expires_in);
 
+        let mut poll_count = 0u32;
         loop {
             tokio::time::sleep(interval).await;
+            poll_count += 1;
 
             if tokio::time::Instant::now() > deadline {
                 anyhow::bail!("Device code flow timed out — please try again");
             }
 
+            // Per OAuth spec, the token poll must NOT include scope —
+            // the scope was already bound when the device code was issued.
             let resp = self
                 .http
                 .post(&token_url)
@@ -314,15 +338,25 @@ impl AuthManager {
                 .send()
                 .await?;
 
+            let status = resp.status();
             let body = resp.bytes().await?;
+            let body_str = String::from_utf8_lossy(&body);
+
+            // Log raw response for debugging
+            eprint!(".");
+            if poll_count % 12 == 0 {
+                // Newline every ~60s so dots don't wrap forever
+                eprintln!(" (waiting — poll #{poll_count})");
+            }
 
             if let Ok(token_resp) = serde_json::from_slice::<FullTokenResponse>(&body) {
+                eprintln!(); // End the dot line
                 let now = chrono::Utc::now().timestamp();
 
-                // Try to extract account from the id_token or access_token
                 let account = extract_account(&token_resp.access_token)
                     .or_else(|| self.account_hint.clone());
 
+                let has_refresh = token_resp.refresh_token.is_some();
                 let cache = TokenCache {
                     client_id: self.client_id.clone(),
                     access_token: token_resp.access_token,
@@ -331,6 +365,15 @@ impl AuthManager {
                     account,
                 };
                 cache.save()?;
+
+                if !has_refresh {
+                    eprintln!(
+                        "  {}",
+                        "Warning: no refresh token returned. Token refresh will require re-login."
+                            .yellow()
+                    );
+                }
+
                 return Ok(cache);
             }
 
@@ -342,6 +385,7 @@ impl AuthManager {
                         continue;
                     }
                     _ => {
+                        eprintln!(); // End the dot line
                         anyhow::bail!(
                             "Login failed: {} — {}",
                             err_resp.error,
@@ -351,7 +395,11 @@ impl AuthManager {
                 }
             }
 
-            anyhow::bail!("Unexpected response during login");
+            // Neither success nor known error — dump the response for debugging
+            eprintln!();
+            eprintln!("  {} HTTP {status}", "Unexpected token response:".red());
+            eprintln!("  {body_str}");
+            anyhow::bail!("Unexpected response during device code login (HTTP {status})");
         }
     }
 }
