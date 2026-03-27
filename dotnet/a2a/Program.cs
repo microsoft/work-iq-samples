@@ -471,6 +471,17 @@ class WireLog : DelegatingHandler
 
             Console.ResetColor();
         }
+        else if (Verbosity >= 1)
+        {
+            // Always print key diagnostic headers for troubleshooting
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            foreach (var name in new[] { "request-id", "x-ms-ags-diagnostic" })
+            {
+                if (res.Headers.TryGetValues(name, out var values))
+                    Console.WriteLine($"  {name}: {string.Join(", ", values)}");
+            }
+            Console.ResetColor();
+        }
 
         return res;
     }

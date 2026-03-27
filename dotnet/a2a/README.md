@@ -2,7 +2,7 @@
 
 A minimal, single-file interactive client for communicating with Work IQ agents using the [Agent-to-Agent (A2A) protocol](https://a2a-protocol.org).
 
-> **Prerequisites, authentication, and common issues** are covered in the [root README](../README.md). Read that first.
+> **Prerequisites, authentication, and common issues** are covered in the [root README](../../README.md). Read that first.
 
 ## What is A2A?
 
