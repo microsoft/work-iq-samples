@@ -2,27 +2,11 @@
 
 Sample clients for the [Work IQ](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/workiq-overview) API — Microsoft's AI-native interface to Microsoft 365 work intelligence.
 
-## .NET Samples (`dotnet/`)
-
-| Sample | Protocol | Description |
-|--------|----------|-------------|
-| [**dotnet/a2a/**](dotnet/a2a/) | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | Interactive agent session using the A2A .NET SDK |
-| [**dotnet/a2a-raw/**](dotnet/a2a-raw/) | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | Same as above but with raw `HttpClient` — no SDK, just HTTP + JSON |
-| [**dotnet/rest/**](dotnet/rest/) | REST | Interactive chat using the [Copilot Chat API](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview) with sync and streaming modes |
-
-All .NET samples are single-file, minimal-dependency console apps (.NET 8+) designed to be read, modified, and used as starting points for your own integration.
-
-## Swift Samples (`swift/`)
-
-| Sample | Protocol | Description |
-|--------|----------|-------------|
-| [**swift/a2a/**](swift/a2a/) | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | SwiftUI iOS/iPadOS chat app using A2A v0.3 with streaming responses |
-
-## Rust Samples (`rust/`)
-
-| Sample | Protocol | Description |
-|--------|----------|-------------|
-| [**rust/a2a/**](rust/a2a/) | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | Interactive agent session with device code auth, token caching, and SSE streaming |
+| Sample | Language | Protocol | Description |
+|--------|----------|----------|-------------|
+| [**dotnet/a2a/**](dotnet/a2a/) | C# | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | Interactive agent session using the open A2A protocol over JSON-RPC |
+| [**dotnet/rest/**](dotnet/rest/) | C# | REST | Interactive chat using the [Copilot Chat API](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview) with sync and streaming modes |
+| [**rust/a2a/**](rust/a2a/) | Rust | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | Interactive agent session with device code auth, token caching, and SSE streaming |
 
 > **Current state**: Work IQ is accessed through the Microsoft Graph API at `graph.microsoft.com`. All samples use Graph endpoints and Graph authentication today.
 >
