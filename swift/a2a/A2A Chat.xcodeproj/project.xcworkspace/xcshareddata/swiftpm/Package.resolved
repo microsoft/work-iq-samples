@@ -1,0 +1,24 @@
+{
+  "originHash" : "725eae40c08fa42de9cefc383dd986cbec3f7a6bd4e15f941ef5773c035c0f49",
+  "pins" : [
+    {
+      "identity" : "a2a-client-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tolgaki/a2a-client-swift",
+      "state" : {
+        "revision" : "6e260fb77ae114ea1257a3e68e34a12a7b767bb5",
+        "version" : "1.0.12"
+      }
+    },
+    {
+      "identity" : "microsoft-authentication-library-for-objc",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/AzureAD/microsoft-authentication-library-for-objc",
+      "state" : {
+        "revision" : "be848ee7fa9516cec47ae6de47cf1087d51bc774",
+        "version" : "1.9.0"
+      }
+    }
+  ],
+  "version" : 3
+}
