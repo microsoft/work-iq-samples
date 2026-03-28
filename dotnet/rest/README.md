@@ -4,7 +4,7 @@ A minimal, single-file interactive client for the [Microsoft 365 Copilot Chat AP
 
 Supports both **synchronous** and **streaming** (SSE) modes.
 
-> **Prerequisites, authentication, and common issues** are covered in the [root README](../README.md). Read that first.
+> **Prerequisites, authentication, and common issues** are covered in the [root README](../../README.md). Read that first.
 
 ## API reference
 
