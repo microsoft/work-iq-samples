@@ -12,6 +12,12 @@ Sample clients for the [Work IQ](https://learn.microsoft.com/en-us/microsoft-365
 
 All .NET samples are single-file, minimal-dependency console apps (.NET 8+) designed to be read, modified, and used as starting points for your own integration.
 
+## Swift Samples (`swift/`)
+
+| Sample | Protocol | Description |
+|--------|----------|-------------|
+| [**swift/a2a/**](swift/a2a/) | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | SwiftUI iOS/iPadOS chat app using A2A v0.3 with streaming responses |
+
 ## Rust Samples (`rust/`)
 
 | Sample | Protocol | Description |

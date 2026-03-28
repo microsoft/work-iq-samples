@@ -417,11 +417,19 @@ FodyWeavers.xsd
 *.msm
 *.msp
 
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+
 # Rust build output
 rust/*/target/
 
 # OS
 .DS_Store
+
+# iOS app configuration (contains client ID)
+swift/a2a/A2A Chat/Configuration.plist
 
 # Claude
 .claude/
