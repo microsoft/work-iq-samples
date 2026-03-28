@@ -2,13 +2,27 @@
 
 Sample clients for the [Work IQ](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/workiq-overview) API — Microsoft's AI-native interface to Microsoft 365 work intelligence.
 
+## .NET Samples (`dotnet/`)
+
 | Sample | Protocol | Description |
 |--------|----------|-------------|
-| [**a2a/**](a2a/) | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | Interactive agent session using the open A2A protocol over JSON-RPC |
-| [**rest/**](rest/) | REST | Interactive chat using the [Copilot Chat API](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview) with sync and streaming modes |
+| [**dotnet/a2a/**](dotnet/a2a/) | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | Interactive agent session using the A2A .NET SDK |
+| [**dotnet/a2a-raw/**](dotnet/a2a-raw/) | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | Same as above but with raw `HttpClient` — no SDK, just HTTP + JSON |
+| [**dotnet/rest/**](dotnet/rest/) | REST | Interactive chat using the [Copilot Chat API](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview) with sync and streaming modes |
+
+All .NET samples are single-file, minimal-dependency console apps (.NET 8+) designed to be read, modified, and used as starting points for your own integration.
+
+## Swift Samples (`swift/`)
+
+| Sample | Protocol | Description |
+|--------|----------|-------------|
 | [**swift/a2a/**](swift/a2a/) | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | SwiftUI iOS/iPadOS chat app using A2A v0.3 with streaming responses |
 
-The .NET samples (`a2a/`, `rest/`) are single-file, minimal-dependency console apps designed to be read, modified, and used as starting points for your own integration. The Swift sample (`swift/a2a/`) is a native iOS/iPadOS app.
+## Rust Samples (`rust/`)
+
+| Sample | Protocol | Description |
+|--------|----------|-------------|
+| [**rust/a2a/**](rust/a2a/) | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | Interactive agent session with device code auth, token caching, and SSE streaming |
 
 > **Current state**: Work IQ is accessed through the Microsoft Graph API at `graph.microsoft.com`. All samples use Graph endpoints and Graph authentication today.
 >
@@ -16,15 +30,11 @@ The .NET samples (`a2a/`, `rest/`) are single-file, minimal-dependency console a
 
 ## Prerequisites
 
-### 1. .NET SDK
-
-[.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later.
-
-### 2. Microsoft 365 Copilot license
+### 1. Microsoft 365 Copilot license
 
 The Chat API is only available to users with a **Microsoft 365 Copilot** add-on license. Users without the license will get access denied errors. See [licensing docs](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview#licensing).
 
-### 3. Azure AD app registration
+### 2. Azure AD app registration
 
 Register an app in [Azure portal](https://portal.azure.com) > Microsoft Entra ID > App registrations:
 
@@ -46,19 +56,28 @@ Register an app in [Azure portal](https://portal.azure.com) > Microsoft Entra ID
 
 After adding permissions, click **Grant admin consent for [your tenant]**.
 
+### 3. Language-specific SDKs
+
+- **dotnet/** samples: [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later
+- **rust/** samples: [Rust toolchain](https://rustup.rs/) (stable)
+
 ## Authentication
 
-Both samples support two authentication methods:
-
-### WAM (Windows Account Manager) — recommended on Windows
+### WAM (Windows Account Manager) — recommended on Windows (.NET only)
 
 Uses the Windows broker for silent SSO. No browser popup for returning users.
 
 ```bash
-dotnet run -- --token WAM --appid <your-app-client-id>
+cd dotnet/a2a
+dotnet run -- --graph --token WAM --appid <your-app-client-id>
+```
 
-# With account hint (skips account picker)
-dotnet run -- --token WAM --appid <your-app-client-id> --account user@contoso.com
+### Device code flow — any platform (Rust)
+
+```bash
+cd rust/a2a
+cargo run -- --appid <your-app-client-id>
+# Follow the on-screen instructions to authenticate in a browser
 ```
 
 ### Pre-obtained JWT token — any platform
@@ -66,34 +85,18 @@ dotnet run -- --token WAM --appid <your-app-client-id> --account user@contoso.co
 Acquire a token externally (e.g., via [Graph Explorer](https://developer.microsoft.com/en-us/graph/graph-explorer), `az account get-access-token`, or your own MSAL code) and pass it directly:
 
 ```bash
-dotnet run -- --token eyJ0eXAiOiJKV1Qi...
+# .NET
+cd dotnet/a2a
+dotnet run -- --graph --token eyJ0eXAiOiJKV1Qi...
+
+# Rust
+cd rust/a2a
+cargo run -- --token eyJ0eXAiOiJKV1Qi...
 ```
 
 The token must have:
 - **Audience**: `https://graph.microsoft.com`
 - **Scopes**: all 7 delegated permissions listed above
-
-### Print token for reuse
-
-```bash
-dotnet run -- --token WAM --appid <your-app-client-id> --show-token
-# Copy the printed token, then reuse:
-dotnet run -- --token <paste-token-here>
-```
-
-## Platform support
-
-| Platform | Auth method | Status |
-|----------|------------|--------|
-| **Windows** | WAM broker (silent SSO) | Tested |
-| **macOS** | Interactive browser login | Should work (untested) |
-| **Linux / WSL** | Interactive browser login | Should work (untested) |
-
-On macOS/Linux, `--token WAM` is not available. Use `--token <JWT>` with a pre-obtained token, or MSAL will fall back to interactive browser authentication.
-
-## Token caching
-
-Tokens are held **in memory only** for the duration of the session. Each run requires fresh authentication. For production applications, consider using [MSAL token cache serialization](https://learn.microsoft.com/en-us/entra/msal/dotnet/how-to/token-cache-serialization) with platform-appropriate encryption (DPAPI on Windows, Keychain on macOS, keyring on Linux).
 
 ## Common issues
 

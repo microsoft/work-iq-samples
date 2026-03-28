@@ -422,6 +422,9 @@ xcuserdata/
 *.xcuserstate
 DerivedData/
 
+# Rust build output
+rust/*/target/
+
 # OS
 .DS_Store
 
