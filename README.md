@@ -8,6 +8,18 @@ Sample clients for the [Work IQ](https://learn.microsoft.com/en-us/microsoft-365
 | [**dotnet/rest/**](dotnet/rest/) | C# | REST | Interactive chat using the [Copilot Chat API](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview) with sync and streaming modes |
 | [**rust/a2a/**](rust/a2a/) | Rust | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | Interactive agent session with device code auth, token caching, and SSE streaming |
 
+## Swift Samples (`swift/`)
+
+| Sample | Protocol | Description |
+|--------|----------|-------------|
+| [**swift/a2a/**](swift/a2a/) | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | SwiftUI iOS/iPadOS chat app using A2A v0.3 with streaming responses |
+
+## Rust Samples (`rust/`)
+
+| Sample | Protocol | Description |
+|--------|----------|-------------|
+| [**rust/a2a/**](rust/a2a/) | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | Interactive agent session with device code auth, token caching, and SSE streaming |
+
 > **Current state**: Work IQ is accessed through the Microsoft Graph API at `graph.microsoft.com`. All samples use Graph endpoints and Graph authentication today.
 >
 > **What's coming**: A dedicated Work IQ gateway (`workiq.svc.cloud.microsoft`) with its own app registration, scopes (`WorkIQAgent.Ask`), and endpoint. When available, these samples will be updated with the new endpoint and auth model. Your integration code will change minimally — different token audience and endpoint URL, same protocols.
