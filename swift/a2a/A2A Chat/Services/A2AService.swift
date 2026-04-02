@@ -19,11 +19,23 @@ private let log = Logger(subsystem: "app.blueglass.A2A-Chat", category: "A2A")
 class A2AService {
     private let authService: AuthService
     private var contextId: String?
-
-    private static let endpoint = URL(string: "https://graph.microsoft.com/rp/workiq/")!
+    private let endpoint: URL?
 
     init(authService: AuthService) {
         self.authService = authService
+        self.endpoint = Self.loadEndpoint()
+    }
+
+    private static func loadEndpoint() -> URL? {
+        guard let path = Bundle.main.path(forResource: "Configuration", ofType: "plist"),
+              let dict = NSDictionary(contentsOfFile: path),
+              let urlString = dict["Endpoint"] as? String,
+              !urlString.isEmpty,
+              urlString != "YOUR_ENDPOINT_URL",
+              let url = URL(string: urlString) else {
+            return nil
+        }
+        return url
     }
 
     // MARK: - Public interface
@@ -36,7 +48,7 @@ class A2AService {
 
         log.info("Sending streaming message (contextId: \(self.contextId ?? "nil"))")
 
-        let client = makeClient(token: token)
+        let client = try makeClient(token: token)
         let stream = try await client.sendStreamingMessage(text, contextId: contextId)
 
         var accumulated = ""
@@ -103,7 +115,7 @@ class A2AService {
             throw URLError(.userAuthenticationRequired)
         }
 
-        let client = makeClient(token: token)
+        let client = try makeClient(token: token)
         let response = try await client.sendMessage(text, contextId: contextId)
 
         switch response {
@@ -123,11 +135,17 @@ class A2AService {
 
     // MARK: - Private
 
-    private func makeClient(token: String) -> A2AClient {
-        let auth = WorkIQAuth(token: token)
+    private func makeClient(token: String) throws -> A2AClient {
+        guard let endpoint else {
+            throw URLError(.badURL, userInfo: [
+                NSLocalizedDescriptionKey: "Endpoint not configured. Set the Endpoint value in Configuration.plist. See README for setup instructions."
+            ])
+        }
+
+        let auth = BearerTokenAuth(token: token)
 
         let config = A2AClientConfiguration(
-            baseURL: Self.endpoint,
+            baseURL: endpoint,
             transportBinding: .jsonRPC,
             protocolVersion: "0.3",
             timeoutInterval: 300,
@@ -139,7 +157,7 @@ class A2AService {
 }
 
 /// Auth provider that adds a bearer token to every request.
-private struct WorkIQAuth: AuthenticationProvider, Sendable {
+private struct BearerTokenAuth: AuthenticationProvider, Sendable {
     let token: String
 
     func authenticate(request: URLRequest) async throws -> URLRequest {

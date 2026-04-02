@@ -21,11 +21,15 @@ class AuthService {
     private var application: MSALPublicClientApplication?
     private var account: MSALAccount?
 
-    private static let redirectUri = "msauth.app.blueglass.A2A-Chat://auth"
-    private static let scopes = ["https://graph.microsoft.com/.default"]
+    private let scopes: [String]
 
     init() {
         let clientId = Self.loadClientId()
+        let redirectUri = Self.loadRedirectUri()
+        let tenantId = Self.loadTenantId() ?? "common"
+        let scopes = Self.loadScopes() ?? ["https://graph.microsoft.com/.default"]
+        self.scopes = scopes
+
         guard let clientId else {
             log.error("Configuration.plist missing or invalid")
             self.error = "Copy Configuration.example.plist to Configuration.plist and set your App ID. See README for setup instructions."
@@ -33,18 +37,22 @@ class AuthService {
         }
 
         log.info("MSAL init — clientId: \(clientId)")
-        log.info("MSAL init — redirectUri: \(Self.redirectUri)")
+        log.info("MSAL init — redirectUri: \(redirectUri ?? "nil")")
+        log.info("MSAL init — tenantId: \(tenantId)")
+        log.info("MSAL init — scopes: \(scopes.joined(separator: ", "))")
 
         do {
             let config = MSALPublicClientApplicationConfig(clientId: clientId)
             log.info("MSAL config created")
 
-            let authorityURL = URL(string: "https://login.microsoftonline.com/common")!
+            let authorityURL = URL(string: "https://login.microsoftonline.com/\(tenantId)")!
             config.authority = try MSALAADAuthority(url: authorityURL)
             log.info("MSAL authority set: \(authorityURL.absoluteString)")
 
-            config.redirectUri = Self.redirectUri
-            log.info("MSAL redirectUri set: \(Self.redirectUri)")
+            if let redirectUri {
+                config.redirectUri = redirectUri
+            }
+            log.info("MSAL redirectUri set: \(config.redirectUri ?? "default")")
 
             log.info("MSAL creating MSALPublicClientApplication...")
             application = try MSALPublicClientApplication(configuration: config)
@@ -69,6 +77,37 @@ class AuthService {
             return nil
         }
         return clientId
+    }
+
+    private static func loadRedirectUri() -> String? {
+        guard let path = Bundle.main.path(forResource: "Configuration", ofType: "plist"),
+              let dict = NSDictionary(contentsOfFile: path),
+              let uri = dict["RedirectUri"] as? String,
+              !uri.isEmpty,
+              uri != "YOUR_REDIRECT_URI" else {
+            return nil
+        }
+        return uri
+    }
+
+    private static func loadTenantId() -> String? {
+        guard let path = Bundle.main.path(forResource: "Configuration", ofType: "plist"),
+              let dict = NSDictionary(contentsOfFile: path),
+              let tenantId = dict["TenantId"] as? String,
+              !tenantId.isEmpty else {
+            return nil
+        }
+        return tenantId
+    }
+
+    private static func loadScopes() -> [String]? {
+        guard let path = Bundle.main.path(forResource: "Configuration", ofType: "plist"),
+              let dict = NSDictionary(contentsOfFile: path),
+              let scopes = dict["Scopes"] as? [String],
+              !scopes.isEmpty else {
+            return nil
+        }
+        return scopes
     }
 
     func signIn() async {
@@ -102,10 +141,10 @@ class AuthService {
             webParams.webviewType = .authenticationSession
             webParams.prefersEphemeralWebBrowserSession = true
             let params = MSALInteractiveTokenParameters(
-                scopes: Self.scopes,
+                scopes: scopes,
                 webviewParameters: webParams
             )
-            log.info("signIn — calling acquireToken (scopes: \(Self.scopes.joined(separator: ", ")))")
+            log.info("signIn — calling acquireToken (scopes: \(self.scopes.joined(separator: ", ")))")
 
             let result = try await application.acquireToken(with: params)
             log.info("signIn — token acquired for \(result.account.username ?? "unknown")")
@@ -139,7 +178,7 @@ class AuthService {
     private func acquireTokenSilently() async throws -> MSALResult? {
         guard let application, let account else { return nil }
         log.info("acquireTokenSilently — account: \(account.username ?? "unknown")")
-        let params = MSALSilentTokenParameters(scopes: Self.scopes, account: account)
+        let params = MSALSilentTokenParameters(scopes: scopes, account: account)
         let result = try await application.acquireTokenSilent(with: params)
         log.info("acquireTokenSilently — success")
         applyResult(result)

@@ -1,6 +1,6 @@
 # ── A2A Chat — Azure AD App Registration Setup ──────────────────────────
 # Creates a single-tenant app registration with the required Graph API
-# delegated permissions for the Work IQ A2A Chat sample app.
+# delegated permissions for the A2A Chat sample app.
 #
 # Prerequisites: az CLI, logged in (az login)
 # Usage: .\setup-app-registration.ps1

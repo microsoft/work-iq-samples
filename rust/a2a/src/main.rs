@@ -4,7 +4,7 @@ mod config;
 
 use a2a::WorkIQClient;
 use a2a_rs_core::{Message, Part, Role, SendMessageConfiguration, SendMessageResult, StreamingMessageResult};
-use auth::{decode_token, AuthManager, TokenCache};
+use auth::{decode_token, AuthManager};
 use clap::Parser;
 use colored::Colorize;
 use config::{Cli, Command, WORKIQ_AUTHORITY, WORKIQ_ENDPOINT, WORKIQ_SCOPES};
@@ -34,10 +34,10 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Login) => {
             require_app_id(&app_id)?;
             let mut mgr =
-                AuthManager::new(&app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, cli.account.as_deref());
+                AuthManager::new(&app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, cli.account.as_deref()).await?;
             let token = mgr.get_token(verbosity).await?;
             println!("\n{}", "Logged in successfully.".green().bold());
-            if let Some(acct) = mgr.cached_account() {
+            if let Some(acct) = mgr.cached_account().await {
                 println!("  Account: {}", acct.cyan());
             }
             if verbosity >= 1 {
@@ -47,44 +47,38 @@ async fn main() -> anyhow::Result<()> {
             return Ok(());
         }
         Some(Command::Logout) => {
-            TokenCache::clear()?;
-            println!("{}", "Logged out. Token cache cleared.".green());
+            require_app_id(&app_id)?;
+            let mgr =
+                AuthManager::new(&app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, None).await?;
+            mgr.sign_out_all().await?;
+            println!("{}", "Logged out.".green());
             return Ok(());
         }
         Some(Command::Status) => {
-            match TokenCache::load() {
-                Some(cache) => {
-                    println!("{}", "Cached session found.".green());
-                    println!("  Client ID: {}", cache.client_id.dimmed());
-                    if let Some(ref acct) = cache.account {
-                        println!("  Account:   {}", acct.cyan());
-                    }
-                    if cache.is_expired() {
-                        println!("  Token:     {}", "EXPIRED".red().bold());
-                        if cache.refresh_token.is_some() {
-                            println!(
-                                "  {}",
-                                "Refresh token available — will auto-renew on next use.".dimmed()
-                            );
-                        }
-                    } else {
-                        let remaining = cache.expires_at - chrono::Utc::now().timestamp();
-                        println!(
-                            "  Token:     {} ({}m {}s remaining)",
-                            "valid".green(),
-                            remaining / 60,
-                            remaining % 60
-                        );
-                    }
+            require_app_id(&app_id)?;
+            let mut mgr =
+                AuthManager::new(&app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, cli.account.as_deref()).await?;
+            if !mgr.has_accounts().await {
+                println!(
+                    "{}",
+                    "No cached session. Run `workiq-a2a login` to authenticate.".yellow()
+                );
+                return Ok(());
+            }
+            println!("{}", "Cached session found.".green());
+            println!("  Client ID: {}", app_id.dimmed());
+            if let Some(acct) = mgr.cached_account().await {
+                println!("  Account:   {}", acct.cyan());
+            }
+            match mgr.ensure_fresh(0).await {
+                Ok(token) => {
+                    decode_token(&token);
                     if cli.show_token {
-                        println!("\n  {}\n", cache.access_token);
+                        println!("\n  {token}\n");
                     }
                 }
-                None => {
-                    println!(
-                        "{}",
-                        "No cached session. Run `workiq-a2a login` to authenticate.".yellow()
-                    );
+                Err(_) => {
+                    println!("  Token:     {}", "expired or unavailable".yellow());
                 }
             }
             return Ok(());
@@ -98,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
     } else {
         require_app_id(&app_id)?;
         let mut mgr =
-            AuthManager::new(&app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, cli.account.as_deref());
+            AuthManager::new(&app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, cli.account.as_deref()).await?;
         let token = mgr.get_token(verbosity).await?;
         (token, Some(mgr))
     };
@@ -121,7 +115,7 @@ async fn main() -> anyhow::Result<()> {
         let mode = if cli.stream { "Streaming" } else { "Sync" };
         log_header(&format!("READY — Graph RP — {mode} — {endpoint}"));
         if let Some(ref mgr) = auth_mgr {
-            if let Some(acct) = mgr.cached_account() {
+            if let Some(acct) = mgr.cached_account().await {
                 println!("  Signed in as {}", acct.cyan());
             }
         }
