@@ -171,7 +171,13 @@ class AuthService {
 
     func refreshToken() async -> String? {
         guard application != nil else { return accessToken }
-        _ = try? await acquireTokenSilently()
+        do {
+            _ = try await acquireTokenSilently()
+        } catch {
+            log.error("refreshToken — silent refresh failed: \(error.localizedDescription)")
+            accessToken = nil
+            isAuthenticated = false
+        }
         return accessToken
     }
 
