@@ -71,6 +71,16 @@ $PlistContent = @"
 <dict>
     <key>ClientId</key>
     <string>$AppId</string>
+    <key>RedirectUri</key>
+    <string>$RedirectUri</string>
+    <key>TenantId</key>
+    <string>common</string>
+    <key>Scopes</key>
+    <array>
+        <string>https://graph.microsoft.com/.default</string>
+    </array>
+    <key>Endpoint</key>
+    <string>YOUR_ENDPOINT_URL</string>
 </dict>
 </plist>
 "@

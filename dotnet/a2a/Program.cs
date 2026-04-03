@@ -449,6 +449,9 @@ class WireLog : DelegatingHandler
                 foreach (var h in body.Headers) Console.WriteLine($"    {h.Key}: {string.Join(", ", h.Value)}");
                 var text = await body.ReadAsStringAsync(ct);
                 Console.WriteLine($"    Body: {Trunc(text, 500)}");
+                // Re-create content so the stream can be read again by SendAsync
+                var newContent = new StringContent(text, System.Text.Encoding.UTF8, body.Headers.ContentType?.MediaType ?? "application/json");
+                req.Content = newContent;
             }
 
             Console.ResetColor();

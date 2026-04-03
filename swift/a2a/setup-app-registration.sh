@@ -85,6 +85,16 @@ cat > "$SCRIPT_DIR/A2A Chat/Configuration.plist" <<PLIST
 <dict>
     <key>ClientId</key>
     <string>$APP_ID</string>
+    <key>RedirectUri</key>
+    <string>$REDIRECT_URI</string>
+    <key>TenantId</key>
+    <string>common</string>
+    <key>Scopes</key>
+    <array>
+        <string>https://graph.microsoft.com/.default</string>
+    </array>
+    <key>Endpoint</key>
+    <string>YOUR_ENDPOINT_URL</string>
 </dict>
 </plist>
 PLIST
