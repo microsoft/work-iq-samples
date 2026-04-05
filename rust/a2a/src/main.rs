@@ -577,3 +577,293 @@ impl Drop for Spinner {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── uuid_v4 ─────────────────────────────────────────────────────
+
+    #[test]
+    fn uuid_v4_format() {
+        let id = uuid_v4();
+        assert_eq!(id.len(), 32, "expected 32 hex chars, got {}", id.len());
+        assert!(
+            id.chars().all(|c| c.is_ascii_hexdigit()),
+            "non-hex char in: {id}"
+        );
+    }
+
+    #[test]
+    fn uuid_v4_uniqueness() {
+        let a = uuid_v4();
+        // Small sleep so the nanos-based ID advances
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        let b = uuid_v4();
+        assert_ne!(a, b, "IDs should differ with a time gap");
+    }
+
+    // ── build_message ───────────────────────────────────────────────
+
+    #[test]
+    fn build_message_structure() {
+        let msg = build_message(Role::User, "hello", None);
+        assert_eq!(msg.kind, "message");
+        assert_eq!(msg.role, Role::User);
+        assert_eq!(msg.parts.len(), 1);
+        match &msg.parts[0] {
+            Part::Text { text, .. } => assert_eq!(text, "hello"),
+            other => panic!("expected Text part, got {other:?}"),
+        }
+        assert!(msg.context_id.is_none());
+        assert_eq!(msg.message_id.len(), 32);
+    }
+
+    #[test]
+    fn build_message_with_context() {
+        let msg = build_message(Role::Agent, "reply", Some("ctx-42".into()));
+        assert_eq!(msg.context_id.as_deref(), Some("ctx-42"));
+        assert_eq!(msg.role, Role::Agent);
+    }
+
+    #[test]
+    fn build_message_has_location_metadata() {
+        let msg = build_message(Role::User, "test", None);
+        let meta = msg.metadata.as_ref().expect("metadata missing");
+        let loc = &meta["Location"];
+        assert!(loc.get("timeZoneOffset").is_some(), "missing timeZoneOffset");
+        assert!(loc.get("timeZone").is_some(), "missing timeZone");
+    }
+
+    // ── join_text_parts ─────────────────────────────────────────────
+
+    #[test]
+    fn join_text_parts_basic() {
+        let parts = vec![
+            Part::Text {
+                text: "hello".into(),
+                metadata: None,
+            },
+            Part::Text {
+                text: "world".into(),
+                metadata: None,
+            },
+        ];
+        assert_eq!(join_text_parts(&parts), "hello\nworld");
+    }
+
+    #[test]
+    fn join_text_parts_skips_non_text() {
+        let parts = vec![
+            Part::Text {
+                text: "a".into(),
+                metadata: None,
+            },
+            Part::Data {
+                data: serde_json::json!({}),
+                metadata: None,
+            },
+            Part::Text {
+                text: "b".into(),
+                metadata: None,
+            },
+        ];
+        assert_eq!(join_text_parts(&parts), "a\nb");
+    }
+
+    #[test]
+    fn join_text_parts_empty() {
+        assert_eq!(join_text_parts(&[]), "");
+    }
+
+    #[test]
+    fn join_text_parts_single() {
+        let parts = vec![Part::Text {
+            text: "only".into(),
+            metadata: None,
+        }];
+        assert_eq!(join_text_parts(&parts), "only");
+    }
+
+    // ── extract_result ──────────────────────────────────────────────
+
+    #[test]
+    fn extract_result_from_message() {
+        let msg = Message {
+            kind: "message".into(),
+            message_id: "m1".into(),
+            context_id: Some("ctx-1".into()),
+            task_id: None,
+            role: Role::Agent,
+            parts: vec![Part::Text {
+                text: "response".into(),
+                metadata: None,
+            }],
+            metadata: Some(serde_json::json!({"key": "val"})),
+            extensions: vec![],
+            reference_task_ids: None,
+        };
+        let result = SendMessageResult::Message(msg);
+        let (text, ctx, meta) = extract_result(&result);
+        assert_eq!(text, "response");
+        assert_eq!(ctx.as_deref(), Some("ctx-1"));
+        assert_eq!(meta.unwrap()["key"], "val");
+    }
+
+    #[test]
+    fn extract_result_from_task() {
+        let task = a2a_rs_core::Task {
+            kind: "task".into(),
+            id: "t1".into(),
+            context_id: "ctx-2".into(),
+            status: a2a_rs_core::TaskStatus {
+                state: a2a_rs_core::TaskState::Completed,
+                message: Some(Message {
+                    kind: "message".into(),
+                    message_id: "m2".into(),
+                    context_id: None,
+                    task_id: None,
+                    role: Role::Agent,
+                    parts: vec![Part::Text {
+                        text: "done".into(),
+                        metadata: None,
+                    }],
+                    metadata: Some(serde_json::json!({"cite": true})),
+                    extensions: vec![],
+                    reference_task_ids: None,
+                }),
+                timestamp: None,
+            },
+            artifacts: None,
+            history: None,
+            metadata: None,
+        };
+        let result = SendMessageResult::Task(task);
+        let (text, ctx, meta) = extract_result(&result);
+        assert_eq!(text, "done");
+        assert_eq!(ctx.as_deref(), Some("ctx-2"));
+        assert_eq!(meta.unwrap()["cite"], true);
+    }
+
+    #[test]
+    fn extract_result_task_without_message() {
+        let task = a2a_rs_core::Task {
+            kind: "task".into(),
+            id: "t2".into(),
+            context_id: "ctx-3".into(),
+            status: a2a_rs_core::TaskStatus {
+                state: a2a_rs_core::TaskState::Working,
+                message: None,
+                timestamp: None,
+            },
+            artifacts: None,
+            history: None,
+            metadata: None,
+        };
+        let result = SendMessageResult::Task(task);
+        let (text, ctx, _meta) = extract_result(&result);
+        assert!(text.contains("t2"), "expected task id in fallback: {text}");
+        assert!(text.contains("Working"), "expected state in fallback: {text}");
+        assert_eq!(ctx.as_deref(), Some("ctx-3"));
+    }
+
+    // ── print_delta ─────────────────────────────────────────────────
+
+    #[test]
+    fn print_delta_incremental() {
+        let mut prev = String::new();
+
+        // First call — entire text is new
+        print_delta("Hello", &mut prev);
+        assert_eq!(prev, "Hello");
+
+        // Second call — only " world" is new
+        print_delta("Hello world", &mut prev);
+        assert_eq!(prev, "Hello world");
+    }
+
+    #[test]
+    fn print_delta_full_replace() {
+        let mut prev = "old text".to_string();
+        // New text doesn't start with old — prints full new text
+        print_delta("completely new", &mut prev);
+        assert_eq!(prev, "completely new");
+    }
+
+    #[test]
+    fn print_delta_empty() {
+        let mut prev = String::new();
+        print_delta("", &mut prev);
+        assert_eq!(prev, "");
+    }
+
+    // ── edge-case tests ─────────────────────────────────────────────
+
+    #[test]
+    fn build_message_empty_text() {
+        let msg = build_message(Role::User, "", None);
+        assert_eq!(msg.parts.len(), 1);
+        match &msg.parts[0] {
+            Part::Text { text, .. } => assert_eq!(text, ""),
+            other => panic!("expected Text part, got {other:?}"),
+        }
+        assert_eq!(msg.kind, "message");
+    }
+
+    #[test]
+    fn build_message_special_characters() {
+        let input = "He said \"hello\"\nnew line\ttab 🚀 café";
+        let msg = build_message(Role::User, input, None);
+        match &msg.parts[0] {
+            Part::Text { text, .. } => assert_eq!(text, input),
+            other => panic!("expected Text part, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extract_result_from_task_completed_empty_message() {
+        let task = a2a_rs_core::Task {
+            kind: "task".into(),
+            id: "t-empty".into(),
+            context_id: "ctx-e".into(),
+            status: a2a_rs_core::TaskStatus {
+                state: a2a_rs_core::TaskState::Completed,
+                message: Some(Message {
+                    kind: "message".into(),
+                    message_id: "m-empty".into(),
+                    context_id: None,
+                    task_id: None,
+                    role: Role::Agent,
+                    parts: vec![], // no text parts
+                    metadata: None,
+                    extensions: vec![],
+                    reference_task_ids: None,
+                }),
+                timestamp: None,
+            },
+            artifacts: None,
+            history: None,
+            metadata: None,
+        };
+        let result = SendMessageResult::Task(task);
+        let (text, ctx, _meta) = extract_result(&result);
+        assert_eq!(text, "", "empty parts should produce empty string");
+        assert_eq!(ctx.as_deref(), Some("ctx-e"));
+    }
+
+    #[test]
+    fn join_text_parts_with_newlines_in_text() {
+        let parts = vec![
+            Part::Text {
+                text: "line1\nline2".into(),
+                metadata: None,
+            },
+            Part::Text {
+                text: "line3\nline4".into(),
+                metadata: None,
+            },
+        ];
+        // Parts are joined with \n, so embedded newlines are preserved alongside the separator.
+        assert_eq!(join_text_parts(&parts), "line1\nline2\nline3\nline4");
+    }
+}

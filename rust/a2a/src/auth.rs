@@ -396,3 +396,143 @@ fn decode_jwt_part(part: &str) -> Result<serde_json::Value> {
         .context("base64 decode")?;
     serde_json::from_slice(&decoded).context("JSON parse")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── extract_code_from_request ────────────────────────────────────
+
+    #[test]
+    fn extract_code_valid() {
+        let req = "GET /?code=abc123&state=xyz HTTP/1.1\r\nHost: localhost\r\n";
+        let code = extract_code_from_request(req).unwrap();
+        assert_eq!(code, "abc123");
+    }
+
+    #[test]
+    fn extract_code_no_state() {
+        let req = "GET /?code=onlycode HTTP/1.1\r\n";
+        let code = extract_code_from_request(req).unwrap();
+        assert_eq!(code, "onlycode");
+    }
+
+    #[test]
+    fn extract_code_error_response() {
+        let req = "GET /?error=access_denied&error_description=User+cancelled HTTP/1.1\r\n";
+        let err = extract_code_from_request(req).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("access_denied"), "got: {msg}");
+        assert!(msg.contains("User cancelled"), "got: {msg}");
+    }
+
+    #[test]
+    fn extract_code_url_encoded_error_description() {
+        let req = "GET /?error=invalid_grant&error_description=Token+has+expired HTTP/1.1\r\n";
+        let err = extract_code_from_request(req).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Token has expired"), "got: {msg}");
+    }
+
+    #[test]
+    fn extract_code_missing() {
+        let req = "GET /?state=xyz HTTP/1.1\r\n";
+        let err = extract_code_from_request(req).unwrap_err();
+        assert!(
+            err.to_string().contains("No authorization code"),
+            "got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn extract_code_empty_request() {
+        let err = extract_code_from_request("").unwrap_err();
+        assert!(err.to_string().contains("Empty HTTP request"), "got: {err}");
+    }
+
+    #[test]
+    fn extract_code_malformed_request() {
+        let err = extract_code_from_request("BADREQUEST").unwrap_err();
+        assert!(
+            err.to_string().contains("Malformed HTTP request"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn extract_code_no_query_string() {
+        let req = "GET / HTTP/1.1\r\n";
+        let err = extract_code_from_request(req).unwrap_err();
+        assert!(
+            err.to_string().contains("No authorization code"),
+            "got: {err}"
+        );
+    }
+
+    // ── decode_jwt_part ─────────────────────────────────────────────
+
+    #[test]
+    fn decode_jwt_valid() {
+        // {"sub":"1234567890","name":"Test User"}
+        let encoded = URL_SAFE_NO_PAD
+            .encode(r#"{"sub":"1234567890","name":"Test User"}"#);
+        let val = decode_jwt_part(&encoded).unwrap();
+        assert_eq!(val["sub"], "1234567890");
+        assert_eq!(val["name"], "Test User");
+    }
+
+    #[test]
+    fn decode_jwt_with_padding() {
+        let encoded = URL_SAFE_NO_PAD.encode(r#"{"a":"b"}"#);
+        // Append padding chars — should still work
+        let padded = format!("{encoded}==");
+        let val = decode_jwt_part(&padded).unwrap();
+        assert_eq!(val["a"], "b");
+    }
+
+    #[test]
+    fn decode_jwt_invalid_base64() {
+        let err = decode_jwt_part("!!!not-base64!!!").unwrap_err();
+        assert!(err.to_string().contains("base64"), "got: {err}");
+    }
+
+    #[test]
+    fn decode_jwt_invalid_json() {
+        let encoded = URL_SAFE_NO_PAD.encode("not json at all");
+        let err = decode_jwt_part(&encoded).unwrap_err();
+        assert!(err.to_string().contains("JSON"), "got: {err}");
+    }
+
+    #[test]
+    fn extract_code_with_extra_params() {
+        let req = "GET /?code=XXX&session_state=YYY&other=ZZZ HTTP/1.1\r\n";
+        let code = extract_code_from_request(req).unwrap();
+        assert_eq!(code, "XXX");
+    }
+
+    #[test]
+    fn extract_code_error_takes_priority() {
+        // When both code and error are present, the function should return
+        // the error because errors are checked first (after iterating all params).
+        let req = "GET /?code=XXX&error=access_denied HTTP/1.1\r\n";
+        let result = extract_code_from_request(req);
+        assert!(
+            result.is_err(),
+            "Expected error to take priority over code, but got Ok({:?})",
+            result.unwrap()
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("access_denied"), "got: {msg}");
+    }
+
+    #[test]
+    fn decode_jwt_empty_string() {
+        // Empty string is valid base64 (decodes to empty bytes) but not valid JSON.
+        let err = decode_jwt_part("").unwrap_err();
+        assert!(
+            err.to_string().contains("JSON"),
+            "expected JSON parse error for empty input, got: {err}"
+        );
+    }
+}
