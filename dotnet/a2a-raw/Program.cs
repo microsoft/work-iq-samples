@@ -17,28 +17,20 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Identity.Client;
 using Microsoft.Identity.Client.Broker;
+using WorkIQ.A2ARaw;
 
 // ── Parse args ──────────────────────────────────────────────────────────
 
-string? endpoint = null, token = null, appId = null, account = null;
-bool stream = false, allHeaders = false;
-
-for (int i = 0; i < args.Length; i++)
+var parsed = Helpers.ParseArgs(args);
+if (parsed.Error != null)
 {
-    switch (args[i])
-    {
-        case "--endpoint" or "-e": endpoint = args[++i]; break;
-        case "--token" or "-t": token = args[++i]; break;
-        case "--appid" or "-a": appId = args[++i]; break;
-        case "--account": account = args[++i]; break;
-        case "--stream": stream = true; break;
-        case "--all-headers": allHeaders = true; break;
-        default:
-            Console.Error.WriteLine($"Unknown flag: {args[i]}");
-            PrintUsage();
-            return;
-    }
+    Console.Error.WriteLine(parsed.Error);
+    PrintUsage();
+    return;
 }
+
+string? endpoint = parsed.Endpoint, token = parsed.Token, appId = parsed.AppId, account = parsed.Account;
+bool stream = parsed.Stream, allHeaders = parsed.AllHeaders;
 
 if (string.IsNullOrEmpty(endpoint) || string.IsNullOrEmpty(token))
 {
@@ -225,7 +217,7 @@ async Task SyncResponse(HttpClient client, string ep, HttpContent body, Cancella
                  msg.TryGetProperty("contextId", out var sCtx))
             contextId = sCtx.GetString();
 
-        var text = ExtractText(result);
+        var text = Helpers.ExtractText(result);
         Console.WriteLine(text);
     }
     else
@@ -294,7 +286,7 @@ async Task StreamResponse(HttpClient client, string ep, HttpContent body, Cancel
                 contextId = sCtx.GetString();
 
             // Extract and print text delta
-            var fullText = ExtractText(payload);
+            var fullText = Helpers.ExtractText(payload);
             if (fullText.StartsWith(previousText, StringComparison.Ordinal))
             {
                 Console.Write(fullText[previousText.Length..]);
@@ -310,42 +302,6 @@ async Task StreamResponse(HttpClient client, string ep, HttpContent body, Cancel
     }
 
     Console.WriteLine();
-}
-
-// ── Extract text from A2A response ───────────────────────────────────────
-
-string ExtractText(JsonElement el)
-{
-    // Try direct parts
-    if (TryGetParts(el, out var text)) return text;
-
-    // Try result.status.message.parts (task response)
-    if (el.TryGetProperty("status", out var status) &&
-        status.TryGetProperty("message", out var msg) &&
-        TryGetParts(msg, out text)) return text;
-
-    // Try result.message.parts
-    if (el.TryGetProperty("message", out var m) &&
-        TryGetParts(m, out text)) return text;
-
-    return "";
-}
-
-bool TryGetParts(JsonElement el, out string text)
-{
-    text = "";
-    if (!el.TryGetProperty("parts", out var parts) || parts.ValueKind != JsonValueKind.Array)
-        return false;
-
-    var sb = new StringBuilder();
-    foreach (var part in parts.EnumerateArray())
-    {
-        if (part.TryGetProperty("text", out var t))
-            sb.Append(t.GetString());
-    }
-
-    text = sb.ToString();
-    return text.Length > 0;
 }
 
 // ── WAM auth ─────────────────────────────────────────────────────────────

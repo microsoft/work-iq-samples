@@ -284,19 +284,7 @@ async Task ChatStream(HttpClient client, string convId, string message)
     }
 }
 
-static string BuildChatBody(string message)
-{
-    // Graph API requires IANA timezone (e.g. "America/Los_Angeles"), not Windows (e.g. "Pacific Standard Time")
-    string tz;
-    try { tz = TimeZoneInfo.Local.HasIanaId ? TimeZoneInfo.Local.Id : TimeZoneInfo.TryConvertWindowsIdToIanaId(TimeZoneInfo.Local.Id, out var iana) ? iana : "UTC"; }
-    catch { tz = "UTC"; }
-
-    return JsonSerializer.Serialize(new
-    {
-        message = new { text = message },
-        locationHint = new { timeZone = tz },
-    });
-}
+static string BuildChatBody(string message) => WorkIQ.Rest.Helpers.BuildChatBody(message);
 
 // ── WAM auth ─────────────────────────────────────────────────────────────
 
@@ -376,26 +364,18 @@ static void DecodeToken(string token)
 
 static Config? ParseArgs(string[] args)
 {
-    string? token = null, appId = null, account = null;
-    bool graph = false, workiq = false, stream = false, showToken = false;
-    int verbosity = 1;
-    var headers = new List<string>();
+    var a = WorkIQ.Rest.Helpers.ParseArgs(args);
 
-    for (int i = 0; i < args.Length; i++)
+    if (a.Error != null)
     {
-        switch (args[i])
-        {
-            case "--graph": graph = true; break;
-            case "--workiq": workiq = true; break;
-            case "--token" or "-t": token = args[++i]; break;
-            case "--appid" or "-a": appId = args[++i]; break;
-            case "--account": account = args[++i]; break;
-            case "--stream": stream = true; break;
-            case "--show-token": showToken = true; break;
-            case "--verbosity" or "-v": verbosity = int.Parse(args[++i]); break;
-            case "--header" or "-H": headers.Add(args[++i]); break;
-        }
+        Ink($"ERROR: {a.Error}\n", ConsoleColor.Red);
+        return null;
     }
+
+    string? token = a.Token, appId = a.AppId, account = a.Account;
+    bool graph = a.Graph, workiq = a.Workiq, stream = a.Stream, showToken = a.ShowToken;
+    int verbosity = a.Verbosity;
+    var headers = a.Headers;
 
     if (string.IsNullOrEmpty(token) || (!graph && !workiq))
     {
@@ -473,7 +453,7 @@ static void LogWire(string method, string url, string? body, HttpResponseMessage
     Console.ResetColor();
 }
 
-static string Trunc(string s, int max) => s.Length <= max ? s : $"{s[..max]}...";
+static string Trunc(string s, int max) => WorkIQ.Rest.Helpers.Trunc(s, max);
 
 [DllImport("kernel32.dll", EntryPoint = "GetConsoleWindow")] static extern IntPtr Win32GetConsoleWindow();
 [DllImport("user32.dll", ExactSpelling = true)] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);

@@ -1,152 +1,136 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+using WorkIQ.Rest;
 using Xunit;
 
 namespace WorkIQ.Rest.Tests;
 
 /// <summary>
-/// Tests for arg-parsing logic duplicated from rest Program.cs.
+/// Tests for <see cref="Helpers.ParseArgs"/> — the arg-parsing logic
+/// used by the rest sample app.
 /// </summary>
 public class ArgParsingTests
 {
-    // ── Duplicated types and logic ───────────────────────────────────────
-
-    private record Config(string Token, string AppId, string? Account, bool Stream, bool ShowToken, int Verbosity, List<string> Headers);
-
-    private static Config? ParseArgs(string[] args)
-    {
-        string? token = null, appId = null, account = null;
-        bool graph = false, workiq = false, stream = false, showToken = false;
-        int verbosity = 1;
-        var headers = new List<string>();
-
-        for (int i = 0; i < args.Length; i++)
-        {
-            switch (args[i])
-            {
-                case "--graph": graph = true; break;
-                case "--workiq": workiq = true; break;
-                case "--token" or "-t": token = args[++i]; break;
-                case "--appid" or "-a": appId = args[++i]; break;
-                case "--account": account = args[++i]; break;
-                case "--stream": stream = true; break;
-                case "--show-token": showToken = true; break;
-                case "--verbosity" or "-v": verbosity = int.Parse(args[++i]); break;
-                case "--header" or "-H": headers.Add(args[++i]); break;
-            }
-        }
-
-        if (string.IsNullOrEmpty(token) || (!graph && !workiq))
-            return null;
-
-        if (graph && workiq)
-            return null;
-
-        if (workiq)
-            return null;
-
-        if (token.Equals("WAM", StringComparison.OrdinalIgnoreCase) && string.IsNullOrEmpty(appId))
-            return null;
-
-        return new Config(token, appId ?? "", account, stream, showToken, verbosity, headers);
-    }
-
-    // ── Tests ────────────────────────────────────────────────────────────
-
-    [Fact]
-    public void GraphAndWorkiqTogether_ReturnsNull()
-    {
-        var result = ParseArgs(["--graph", "--workiq", "--token", "abc"]);
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void WamWithoutAppid_ReturnsNull()
-    {
-        var result = ParseArgs(["--graph", "--token", "WAM"]);
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void MissingToken_ReturnsNull()
-    {
-        var result = ParseArgs(["--graph"]);
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void MissingGateway_ReturnsNull()
-    {
-        var result = ParseArgs(["--token", "abc"]);
-        Assert.Null(result);
-    }
-
     [Fact]
     public void ValidArgs_ProduceCorrectConfig()
     {
-        var result = ParseArgs(["--graph", "--token", "mytoken", "--appid", "app1", "--stream", "--account", "user@test.com"]);
-        Assert.NotNull(result);
-        Assert.Equal("mytoken", result.Token);
-        Assert.Equal("app1", result.AppId);
-        Assert.Equal("user@test.com", result.Account);
-        Assert.True(result.Stream);
+        var r = Helpers.ParseArgs(["--graph", "--token", "mytoken", "--appid", "app1", "--stream", "--account", "user@test.com"]);
+        Assert.Null(r.Error);
+        Assert.Equal("mytoken", r.Token);
+        Assert.Equal("app1", r.AppId);
+        Assert.Equal("user@test.com", r.Account);
+        Assert.True(r.Stream);
+        Assert.True(r.Graph);
     }
 
     [Fact]
-    public void VerbosityWithNonInteger_ThrowsFormatException()
+    public void GraphAndWorkiqTogether_BothFlagsSet()
     {
-        // Bug: int.Parse will throw if the value isn't an integer
-        Assert.Throws<FormatException>(() => ParseArgs(["--graph", "--token", "t", "--verbosity", "abc"]));
+        // The Helpers.ParseArgs layer just extracts flags — mutual-exclusion is
+        // enforced at the Program.cs Config-construction layer.
+        var r = Helpers.ParseArgs(["--graph", "--workiq", "--token", "abc"]);
+        Assert.Null(r.Error);
+        Assert.True(r.Graph);
+        Assert.True(r.Workiq);
+    }
+
+    [Fact]
+    public void MissingToken_ReturnsNullToken()
+    {
+        var r = Helpers.ParseArgs(["--graph"]);
+        Assert.Null(r.Error);
+        Assert.Null(r.Token);
+    }
+
+    [Fact]
+    public void MissingGateway_NoGatewayFlagSet()
+    {
+        var r = Helpers.ParseArgs(["--token", "abc"]);
+        Assert.Null(r.Error);
+        Assert.False(r.Graph);
+        Assert.False(r.Workiq);
+    }
+
+    [Fact]
+    public void VerbosityWithNonInteger_ReturnsError()
+    {
+        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--verbosity", "abc"]);
+        Assert.NotNull(r.Error);
+        Assert.Contains("integer", r.Error);
+    }
+
+    [Fact]
+    public void VerbosityWithInteger_Parsed()
+    {
+        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--verbosity", "2"]);
+        Assert.Null(r.Error);
+        Assert.Equal(2, r.Verbosity);
     }
 
     [Fact]
     public void HeaderValues_AreCollected()
     {
-        var result = ParseArgs(["--graph", "--token", "t", "--header", "X-Custom: value1", "-H", "X-Other: value2"]);
-        Assert.NotNull(result);
-        Assert.Equal(2, result.Headers.Count);
-        Assert.Equal("X-Custom: value1", result.Headers[0]);
-        Assert.Equal("X-Other: value2", result.Headers[1]);
+        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--header", "X-Custom: value1", "-H", "X-Other: value2"]);
+        Assert.Null(r.Error);
+        Assert.Equal(2, r.Headers.Count);
+        Assert.Equal("X-Custom: value1", r.Headers[0]);
+        Assert.Equal("X-Other: value2", r.Headers[1]);
     }
 
     [Fact]
     public void ShowToken_Parsed()
     {
-        var result = ParseArgs(["--graph", "--token", "t", "--show-token"]);
-        Assert.NotNull(result);
-        Assert.True(result.ShowToken);
+        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--show-token"]);
+        Assert.Null(r.Error);
+        Assert.True(r.ShowToken);
     }
 
     [Fact]
     public void DefaultVerbosity_IsOne()
     {
-        var result = ParseArgs(["--graph", "--token", "t"]);
-        Assert.NotNull(result);
-        Assert.Equal(1, result.Verbosity);
+        var r = Helpers.ParseArgs(["--graph", "--token", "t"]);
+        Assert.Null(r.Error);
+        Assert.Equal(1, r.Verbosity);
     }
 
     [Fact]
-    public void MissingValueAfterToken_ThrowsIndexOutOfRange()
+    public void MissingValueAfterToken_ReturnsError()
     {
-        Assert.Throws<IndexOutOfRangeException>(() => ParseArgs(["--graph", "--token"]));
+        var r = Helpers.ParseArgs(["--graph", "--token"]);
+        Assert.NotNull(r.Error);
+        Assert.Contains("Missing value", r.Error);
     }
 
-    // ── Edge-case tests ─────────────────────────────────────────────────
+    [Fact]
+    public void MissingValueAfterHeader_ReturnsError()
+    {
+        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--header"]);
+        Assert.NotNull(r.Error);
+        Assert.Contains("Missing value", r.Error);
+    }
 
     [Fact]
-    public void WorkiqGateway_ReturnsNull_WithMessage()
+    public void MissingValueAfterVerbosity_ReturnsError()
     {
-        // --workiq is recognized but not yet implemented — always returns null
-        var result = ParseArgs(["--workiq", "--token", "X"]);
-        Assert.Null(result);
+        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--verbosity"]);
+        Assert.NotNull(r.Error);
+        Assert.Contains("Missing value", r.Error);
+    }
+
+    [Fact]
+    public void WorkiqGateway_FlagRecognized()
+    {
+        var r = Helpers.ParseArgs(["--workiq", "--token", "X"]);
+        Assert.Null(r.Error);
+        Assert.True(r.Workiq);
     }
 
     [Fact]
     public void StreamFlag_SetsStreamTrue()
     {
-        var result = ParseArgs(["--graph", "--token", "t", "--stream"]);
-        Assert.NotNull(result);
-        Assert.True(result.Stream);
+        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--stream"]);
+        Assert.Null(r.Error);
+        Assert.True(r.Stream);
     }
 }

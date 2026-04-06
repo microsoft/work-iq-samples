@@ -69,16 +69,7 @@ struct ChatMessageTests {
 }
 
 // MARK: - BearerTokenAuth Tests
-//
-// NOTE: BearerTokenAuth is declared `private` in A2AService.swift, so it cannot
-// be tested from outside the module. To enable unit testing, consider changing
-// the access level to `internal` (the Swift default) or extracting it into its
-// own file.
-//
-// The tests below demonstrate what SHOULD be tested if the struct were visible.
-// They are commented out because they will not compile against the current source.
 
-/*
 struct BearerTokenAuthTests {
 
     @Test func authenticateAddsBearerHeader() async throws {
@@ -120,7 +111,6 @@ struct BearerTokenAuthTests {
         #expect(authenticated.value(forHTTPHeaderField: "Authorization") == "Bearer ")
     }
 }
-*/
 
 // MARK: - Configuration Loading Tests
 //
@@ -181,38 +171,8 @@ struct ConfigurationLoadingTests {
 */
 
 // MARK: - Markdown Rendering Tests
-//
-// MessageBubbleView.markdownAttributedString is a `private` computed property
-// on a SwiftUI View. To make it testable, consider extracting it into a free
-// function or a static method on ChatMessage / a helper type:
-//
-//   func renderMarkdown(text: String, isComplete: Bool) -> AttributedString
-//
-// The tests below demonstrate what SHOULD be verified. They are commented out
-// because the private property is not accessible from the test target.
 
-/*
 struct MarkdownRenderingTests {
-
-    // Suggested extracted function to test:
-    //
-    // func renderMarkdown(text: String, isComplete: Bool) -> AttributedString {
-    //     if isComplete {
-    //         if let result = try? AttributedString(
-    //             markdown: text,
-    //             options: .init(interpretedSyntax: .full)
-    //         ) {
-    //             return result
-    //         }
-    //     }
-    //     if let result = try? AttributedString(
-    //         markdown: text,
-    //         options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-    //     ) {
-    //         return result
-    //     }
-    //     return AttributedString(text)
-    // }
 
     @Test func completedMessageUsesFullMarkdown() {
         let result = renderMarkdown(text: "**bold** text", isComplete: true)
@@ -249,4 +209,3 @@ struct MarkdownRenderingTests {
         #expect(text.contains("Item 2"))
     }
 }
-*/

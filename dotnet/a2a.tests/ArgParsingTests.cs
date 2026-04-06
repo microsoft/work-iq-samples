@@ -1,149 +1,108 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+using WorkIQ.A2A;
 using Xunit;
 
 namespace WorkIQ.A2A.Tests;
 
 /// <summary>
-/// Tests for arg-parsing logic duplicated from a2a Program.cs.
+/// Tests for <see cref="Helpers.ParseArgs"/> — the arg-parsing logic
+/// used by the a2a sample app.
 /// </summary>
 public class ArgParsingTests
 {
-    // ── Duplicated types and logic ───────────────────────────────────────
-
-    private record GatewayConfig(string Name, string Endpoint, string[] Scopes, string Authority, string[] ExtraHeaders);
-    private record Config(string Token, string AppId, GatewayConfig Gateway, string? Account, bool ShowToken, int Verbosity, bool Stream);
-
-    private static readonly GatewayConfig Graph = new(
-        Name: "Graph RP",
-        Endpoint: "https://graph.microsoft.com/rp/workiq/",
-        Scopes: ["https://graph.microsoft.com/.default"],
-        Authority: "https://login.microsoftonline.com/common",
-        ExtraHeaders: []);
-
-    private static readonly GatewayConfig WorkIQ = new(
-        Name: "WorkIQ Gateway",
-        Endpoint: "",
-        Scopes: [],
-        Authority: "https://login.microsoftonline.com/common",
-        ExtraHeaders: []);
-
-    private static Config? ParseArgs(string[] args)
-    {
-        string? token = null, appId = null, endpoint = null, account = null;
-        bool graph = false, workiq = false, showToken = false, stream = false;
-        int verbosity = 1;
-        var headers = new List<string>();
-
-        for (int i = 0; i < args.Length; i++)
-        {
-            switch (args[i])
-            {
-                case "--graph": graph = true; break;
-                case "--workiq": workiq = true; break;
-                case "--token" or "-t": token = args[++i]; break;
-                case "--appid" or "-a": appId = args[++i]; break;
-                case "--endpoint" or "-e": endpoint = args[++i]; break;
-                case "--account": account = args[++i]; break;
-                case "--show-token": showToken = true; break;
-                case "--stream": stream = true; break;
-                case "--verbosity" or "-v": verbosity = int.Parse(args[++i]); break;
-                case "--header" or "-H": headers.Add(args[++i]); break;
-            }
-        }
-
-        if (string.IsNullOrEmpty(token) || (!graph && !workiq))
-            return null;
-
-        if (graph && workiq)
-            return null;
-
-        if (workiq)
-            return null;
-
-        if (token.Equals("WAM", StringComparison.OrdinalIgnoreCase) && string.IsNullOrEmpty(appId))
-            return null;
-
-        var gw = graph ? Graph : WorkIQ;
-        if (!string.IsNullOrEmpty(endpoint))
-            gw = gw with { Endpoint = endpoint };
-        if (headers.Count > 0)
-            gw = gw with { ExtraHeaders = [.. gw.ExtraHeaders, .. headers] };
-
-        return new Config(token, appId ?? "", gw, account, showToken, verbosity, stream);
-    }
-
-    // ── Tests ────────────────────────────────────────────────────────────
-
     [Fact]
     public void ValidArgs_ProduceCorrectConfig()
     {
-        var result = ParseArgs(["--graph", "--token", "mytoken", "--appid", "app1", "--stream"]);
-        Assert.NotNull(result);
-        Assert.Equal("mytoken", result.Token);
-        Assert.Equal("app1", result.AppId);
-        Assert.True(result.Stream);
-        Assert.Equal("Graph RP", result.Gateway.Name);
+        var r = Helpers.ParseArgs(["--graph", "--token", "mytoken", "--appid", "app1", "--stream"]);
+        Assert.Null(r.Error);
+        Assert.Equal("mytoken", r.Token);
+        Assert.Equal("app1", r.AppId);
+        Assert.True(r.Stream);
+        Assert.True(r.Graph);
     }
 
     [Fact]
-    public void MissingToken_ReturnsNull()
+    public void MissingToken_ReturnsNullToken()
     {
-        Assert.Null(ParseArgs(["--graph"]));
+        var r = Helpers.ParseArgs(["--graph"]);
+        Assert.Null(r.Error);
+        Assert.Null(r.Token);
     }
 
     [Fact]
-    public void MissingGateway_ReturnsNull()
+    public void MissingGateway_NoGatewayFlagSet()
     {
-        Assert.Null(ParseArgs(["--token", "abc"]));
+        var r = Helpers.ParseArgs(["--token", "abc"]);
+        Assert.Null(r.Error);
+        Assert.False(r.Graph);
+        Assert.False(r.Workiq);
     }
 
     [Fact]
-    public void GraphAndWorkiqTogether_ReturnsNull()
+    public void GraphAndWorkiqTogether_BothFlagsSet()
     {
-        Assert.Null(ParseArgs(["--graph", "--workiq", "--token", "abc"]));
+        // Mutual-exclusion is enforced at the Program.cs layer, not here.
+        var r = Helpers.ParseArgs(["--graph", "--workiq", "--token", "abc"]);
+        Assert.Null(r.Error);
+        Assert.True(r.Graph);
+        Assert.True(r.Workiq);
     }
 
     [Fact]
-    public void WamWithoutAppid_ReturnsNull()
+    public void EndpointOverride_Captured()
     {
-        Assert.Null(ParseArgs(["--graph", "--token", "WAM"]));
-    }
-
-    [Fact]
-    public void EndpointOverride_AppliedToGateway()
-    {
-        var result = ParseArgs(["--graph", "--token", "t", "--endpoint", "https://custom.com/"]);
-        Assert.NotNull(result);
-        Assert.Equal("https://custom.com/", result.Gateway.Endpoint);
+        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--endpoint", "https://custom.com/"]);
+        Assert.Null(r.Error);
+        Assert.Equal("https://custom.com/", r.Endpoint);
     }
 
     [Fact]
     public void HeaderValues_AreCollected()
     {
-        var result = ParseArgs(["--graph", "--token", "t", "--header", "X-Custom: v1", "-H", "X-Other: v2"]);
-        Assert.NotNull(result);
-        Assert.Equal(2, result.Gateway.ExtraHeaders.Length);
+        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--header", "X-Custom: v1", "-H", "X-Other: v2"]);
+        Assert.Null(r.Error);
+        Assert.Equal(2, r.Headers.Count);
     }
 
     [Fact]
-    public void VerbosityWithNonInteger_ThrowsFormatException()
+    public void VerbosityWithNonInteger_ReturnsError()
     {
-        Assert.Throws<FormatException>(() => ParseArgs(["--graph", "--token", "t", "--verbosity", "abc"]));
+        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--verbosity", "abc"]);
+        Assert.NotNull(r.Error);
+        Assert.Contains("integer", r.Error);
     }
 
     [Fact]
-    public void MissingValueAfterToken_ThrowsIndexOutOfRange()
+    public void VerbosityWithInteger_Parsed()
     {
-        Assert.Throws<IndexOutOfRangeException>(() => ParseArgs(["--graph", "--token"]));
+        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--verbosity", "3"]);
+        Assert.Null(r.Error);
+        Assert.Equal(3, r.Verbosity);
+    }
+
+    [Fact]
+    public void MissingValueAfterToken_ReturnsError()
+    {
+        var r = Helpers.ParseArgs(["--graph", "--token"]);
+        Assert.NotNull(r.Error);
+        Assert.Contains("Missing value", r.Error);
+    }
+
+    [Fact]
+    public void MissingValueAfterEndpoint_ReturnsError()
+    {
+        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--endpoint"]);
+        Assert.NotNull(r.Error);
+        Assert.Contains("Missing value", r.Error);
     }
 
     [Fact]
     public void DefaultVerbosity_IsOne()
     {
-        var result = ParseArgs(["--graph", "--token", "t"]);
-        Assert.NotNull(result);
-        Assert.Equal(1, result.Verbosity);
+        var r = Helpers.ParseArgs(["--graph", "--token", "t"]);
+        Assert.Null(r.Error);
+        Assert.Equal(1, r.Verbosity);
     }
 }

@@ -3,27 +3,16 @@
 
 using System.Text.Json;
 using A2A;
+using WorkIQ.A2A;
 using Xunit;
 
 namespace WorkIQ.A2A.Tests;
 
 /// <summary>
-/// Tests for Extract/Join logic duplicated from a2a Program.cs.
+/// Tests for <see cref="Helpers.Extract"/> and <see cref="Helpers.Join"/> from the a2a sample app.
 /// </summary>
 public class ExtractTests
 {
-    // ── Duplicated logic under test ──────────────────────────────────────
-
-    private static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(object response) => response switch
-    {
-        AgentMessage am => (Join(am), am.ContextId, am.Metadata),
-        AgentTask { Status: { State: TaskState.Completed, Message: AgentMessage cm } } t => (Join(cm), t.ContextId, cm.Metadata),
-        AgentTask t => ($"[Task {t.Id} — {t.Status.State}]", t.ContextId, null),
-        _ => ("(no response)", null, null),
-    };
-
-    private static string Join(AgentMessage m) => string.Join("\n", m.Parts.OfType<TextPart>().Select(p => p.Text));
-
     // ── Extract tests ───────────────────────────────────────────────────
 
     [Fact]
@@ -37,7 +26,7 @@ public class ExtractTests
             Parts = [new TextPart { Text = "Hello from agent" }],
         };
 
-        var (text, contextId, metadata) = Extract(msg);
+        var (text, contextId, _) = Helpers.Extract(msg);
         Assert.Equal("Hello from agent", text);
         Assert.Equal("ctx-1", contextId);
     }
@@ -57,7 +46,7 @@ public class ExtractTests
             Metadata = meta,
         };
 
-        var (_, _, metadata) = Extract(msg);
+        var (_, _, metadata) = Helpers.Extract(msg);
         Assert.NotNull(metadata);
         Assert.Equal("value", metadata["key"].GetString());
     }
@@ -78,7 +67,7 @@ public class ExtractTests
             Status = new AgentTaskStatus { State = TaskState.Completed, Message = agentMsg },
         };
 
-        var (text, contextId, _) = Extract(task);
+        var (text, contextId, _) = Helpers.Extract(task);
         Assert.Equal("Task done", text);
         Assert.Equal("ctx-2", contextId);
     }
@@ -93,7 +82,7 @@ public class ExtractTests
             Status = new AgentTaskStatus { State = TaskState.Working },
         };
 
-        var (text, contextId, metadata) = Extract(task);
+        var (text, contextId, metadata) = Helpers.Extract(task);
         Assert.Contains("t2", text);
         Assert.Contains("Working", text);
         Assert.Equal("ctx-3", contextId);
@@ -103,7 +92,7 @@ public class ExtractTests
     [Fact]
     public void Extract_UnknownType_ReturnsNoResponse()
     {
-        var (text, contextId, metadata) = Extract("some random object");
+        var (text, contextId, metadata) = Helpers.Extract("some random object");
         Assert.Equal("(no response)", text);
         Assert.Null(contextId);
         Assert.Null(metadata);
@@ -121,7 +110,7 @@ public class ExtractTests
             Parts = [new TextPart { Text = "Line 1" }, new TextPart { Text = "Line 2" }],
         };
 
-        Assert.Equal("Line 1\nLine 2", Join(msg));
+        Assert.Equal("Line 1\nLine 2", Helpers.Join(msg));
     }
 
     [Fact]
@@ -134,7 +123,7 @@ public class ExtractTests
             Parts = [],
         };
 
-        Assert.Equal("", Join(msg));
+        Assert.Equal("", Helpers.Join(msg));
     }
 
     [Fact]
@@ -147,7 +136,7 @@ public class ExtractTests
             Parts = [new TextPart { Text = "visible" }, new DataPart { Data = new Dictionary<string, JsonElement>() }],
         };
 
-        Assert.Equal("visible", Join(msg));
+        Assert.Equal("visible", Helpers.Join(msg));
     }
 
     [Fact]
@@ -167,7 +156,7 @@ public class ExtractTests
             ],
         };
 
-        Assert.Equal("A\nB\nC", Join(msg));
+        Assert.Equal("A\nB\nC", Helpers.Join(msg));
     }
 
     // ── Edge-case tests ─────────────────────────────────────────────────
@@ -182,7 +171,7 @@ public class ExtractTests
             Parts = [],
         };
 
-        var (text, _, _) = Extract(msg);
+        var (text, _, _) = Helpers.Extract(msg);
         Assert.Equal("", text);
     }
 
@@ -197,7 +186,7 @@ public class ExtractTests
             // ContextId not set — defaults to null
         };
 
-        var (text, contextId, _) = Extract(msg);
+        var (text, contextId, _) = Helpers.Extract(msg);
         Assert.Equal("test", text);
         Assert.Null(contextId);
     }

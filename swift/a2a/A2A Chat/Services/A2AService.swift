@@ -157,7 +157,7 @@ class A2AService {
 }
 
 /// Auth provider that adds a bearer token to every request.
-private struct BearerTokenAuth: AuthenticationProvider, Sendable {
+struct BearerTokenAuth: AuthenticationProvider, Sendable {
     let token: String
 
     func authenticate(request: URLRequest) async throws -> URLRequest {

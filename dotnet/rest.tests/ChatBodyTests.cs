@@ -2,36 +2,20 @@
 // Licensed under the MIT License.
 
 using System.Text.Json;
+using WorkIQ.Rest;
 using Xunit;
 
 namespace WorkIQ.Rest.Tests;
 
 /// <summary>
-/// Tests for BuildChatBody logic duplicated from rest Program.cs.
+/// Tests for <see cref="Helpers.BuildChatBody"/> from the rest sample app.
 /// </summary>
 public class ChatBodyTests
 {
-    // ── Duplicated logic under test ──────────────────────────────────────
-
-    private static string BuildChatBody(string message)
-    {
-        string tz;
-        try { tz = TimeZoneInfo.Local.HasIanaId ? TimeZoneInfo.Local.Id : TimeZoneInfo.TryConvertWindowsIdToIanaId(TimeZoneInfo.Local.Id, out var iana) ? iana : "UTC"; }
-        catch { tz = "UTC"; }
-
-        return JsonSerializer.Serialize(new
-        {
-            message = new { text = message },
-            locationHint = new { timeZone = tz },
-        });
-    }
-
-    // ── Tests ────────────────────────────────────────────────────────────
-
     [Fact]
     public void BuildChatBody_ContainsMessageText()
     {
-        var body = BuildChatBody("Hello");
+        var body = Helpers.BuildChatBody("Hello");
         using var doc = JsonDocument.Parse(body);
         var text = doc.RootElement.GetProperty("message").GetProperty("text").GetString();
         Assert.Equal("Hello", text);
@@ -40,7 +24,7 @@ public class ChatBodyTests
     [Fact]
     public void BuildChatBody_OutputIsValidJson()
     {
-        var body = BuildChatBody("test");
+        var body = Helpers.BuildChatBody("test");
         var ex = Record.Exception(() => JsonDocument.Parse(body));
         Assert.Null(ex);
     }
@@ -49,7 +33,7 @@ public class ChatBodyTests
     public void BuildChatBody_SpecialCharacters_ArePreserved()
     {
         var msg = "He said \"hello\"\nNew line\tTab \u00e9";
-        var body = BuildChatBody(msg);
+        var body = Helpers.BuildChatBody(msg);
         using var doc = JsonDocument.Parse(body);
         var text = doc.RootElement.GetProperty("message").GetProperty("text").GetString();
         Assert.Equal(msg, text);
@@ -58,7 +42,7 @@ public class ChatBodyTests
     [Fact]
     public void BuildChatBody_ContainsLocationHintTimeZone()
     {
-        var body = BuildChatBody("test");
+        var body = Helpers.BuildChatBody("test");
         using var doc = JsonDocument.Parse(body);
         var tz = doc.RootElement.GetProperty("locationHint").GetProperty("timeZone").GetString();
         Assert.NotNull(tz);
@@ -68,7 +52,7 @@ public class ChatBodyTests
     [Fact]
     public void BuildChatBody_EmptyMessage_StillValid()
     {
-        var body = BuildChatBody("");
+        var body = Helpers.BuildChatBody("");
         using var doc = JsonDocument.Parse(body);
         var text = doc.RootElement.GetProperty("message").GetProperty("text").GetString();
         Assert.Equal("", text);
@@ -80,7 +64,7 @@ public class ChatBodyTests
     public void BuildChatBody_VeryLongMessage_Handled()
     {
         var longMessage = new string('A', 100_000);
-        var body = BuildChatBody(longMessage);
+        var body = Helpers.BuildChatBody(longMessage);
         using var doc = JsonDocument.Parse(body);
         var text = doc.RootElement.GetProperty("message").GetProperty("text").GetString();
         Assert.Equal(longMessage, text);
@@ -91,7 +75,7 @@ public class ChatBodyTests
     {
         // Attempt to break out of the JSON string value
         var malicious = "\"}, \"evil\": true, {\"";
-        var body = BuildChatBody(malicious);
+        var body = Helpers.BuildChatBody(malicious);
         using var doc = JsonDocument.Parse(body); // must still be valid JSON
         var text = doc.RootElement.GetProperty("message").GetProperty("text").GetString();
         Assert.Equal(malicious, text);
@@ -103,7 +87,7 @@ public class ChatBodyTests
     public void BuildChatBody_NullCharactersInMessage_Handled()
     {
         var msg = "before\0after";
-        var body = BuildChatBody(msg);
+        var body = Helpers.BuildChatBody(msg);
         using var doc = JsonDocument.Parse(body);
         var text = doc.RootElement.GetProperty("message").GetProperty("text").GetString();
         Assert.Equal(msg, text);

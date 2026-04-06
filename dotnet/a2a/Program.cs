@@ -164,15 +164,8 @@ while (true)
 
 // ── Core helpers ─────────────────────────────────────────────────────────
 
-static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(object response) => response switch
-{
-    AgentMessage am => (Join(am), am.ContextId, am.Metadata),
-    AgentTask { Status: { State: TaskState.Completed, Message: AgentMessage cm } } t => (Join(cm), t.ContextId, cm.Metadata),
-    AgentTask t => ($"[Task {t.Id} — {t.Status.State}]", t.ContextId, null),
-    _ => ("(no response)", null, null),
-};
-
-static string Join(AgentMessage m) => string.Join("\n", m.Parts.OfType<TextPart>().Select(p => p.Text));
+static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(object response)
+    => WorkIQ.A2A.Helpers.Extract(response);
 
 static HttpClient CreateHttpClient(string bearerToken, GatewayConfig gw)
 {
@@ -263,27 +256,18 @@ static void DecodeToken(string token)
 
 static Config? ParseArgs(string[] args)
 {
-    string? token = null, appId = null, endpoint = null, account = null;
-    bool graph = false, workiq = false, showToken = false, stream = false;
-    int verbosity = 1;
-    var headers = new List<string>();
+    var a = WorkIQ.A2A.Helpers.ParseArgs(args);
 
-    for (int i = 0; i < args.Length; i++)
+    if (a.Error != null)
     {
-        switch (args[i])
-        {
-            case "--graph": graph = true; break;
-            case "--workiq": workiq = true; break;
-            case "--token" or "-t": token = args[++i]; break;
-            case "--appid" or "-a": appId = args[++i]; break;
-            case "--endpoint" or "-e": endpoint = args[++i]; break;
-            case "--account": account = args[++i]; break;
-            case "--show-token": showToken = true; break;
-            case "--stream": stream = true; break;
-            case "--verbosity" or "-v": verbosity = int.Parse(args[++i]); break;
-            case "--header" or "-H": headers.Add(args[++i]); break;
-        }
+        Ink($"ERROR: {a.Error}\n", ConsoleColor.Red);
+        return null;
     }
+
+    string? token = a.Token, appId = a.AppId, endpoint = a.Endpoint, account = a.Account;
+    bool graph = a.Graph, workiq = a.Workiq, showToken = a.ShowToken, stream = a.Stream;
+    int verbosity = a.Verbosity;
+    var headers = a.Headers;
 
     if (string.IsNullOrEmpty(token) || (!graph && !workiq))
     {
