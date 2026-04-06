@@ -29,7 +29,9 @@ cargo run
 #   and enter the code XXXXXXXXX to authenticate.
 ```
 
-After authentication, your token is cached at `~/.workiq/token_cache.json` and refreshed automatically.
+After authentication, your token is cached locally and refreshed automatically:
+- **macOS / Linux:** `~/.workiq/token_cache.json`
+- **Windows:** `%USERPROFILE%\.workiq\token_cache.json`
 
 ## Usage
 
@@ -93,7 +95,9 @@ A default app ID is included for convenience. To register your own:
 ### macOS / Linux
 
 ```bash
-# Requires Azure CLI — install via: brew install azure-cli
+# Requires Azure CLI
+# macOS:  brew install azure-cli
+# Linux:  https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-linux
 az login
 ./setup-app-registration.sh
 ```
@@ -102,6 +106,7 @@ az login
 
 ```powershell
 # Requires Azure CLI
+# Install: winget install Microsoft.AzureCLI
 az login
 .\setup-app-registration.ps1
 ```
@@ -126,7 +131,7 @@ src/
 2. **Silent refresh** — exchange refresh token for a new access token
 3. **Device code flow** — interactive login as a fallback
 
-Tokens are cached at `~/.workiq/token_cache.json` with `0600` permissions.
+Tokens are cached at `~/.workiq/token_cache.json` (on Unix, file permissions are set to `0600`; on Windows, the file relies on user-level NTFS permissions).
 
 ## License
 

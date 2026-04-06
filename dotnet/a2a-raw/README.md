@@ -24,15 +24,17 @@ Use this sample when you want to understand the A2A protocol at the HTTP level, 
 ```bash
 dotnet build
 
-# Sync mode
+# With a pre-obtained JWT token (any platform)
+dotnet run -- --endpoint https://graph.microsoft.com/rp/workiq/ --token eyJ0eXAi...
+
+# With WAM broker auth (Windows only)
 dotnet run -- --endpoint https://graph.microsoft.com/rp/workiq/ --token WAM --appid <your-app-id>
 
 # Streaming mode (SSE)
 dotnet run -- --endpoint https://graph.microsoft.com/rp/workiq/ --token WAM --appid <your-app-id> --stream
-
-# With a pre-obtained token
-dotnet run -- --endpoint https://graph.microsoft.com/rp/workiq/ --token eyJ0eXAi...
 ```
+
+> **macOS / Linux users:** WAM is only available on Windows. Use `--token <JWT>` with a pre-obtained token instead. See the [root README](../../README.md#authentication) for how to acquire a token.
 
 ## Parameters
 

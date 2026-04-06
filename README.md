@@ -2,23 +2,13 @@
 
 Sample clients for the [Work IQ](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/workiq-overview) API — Microsoft's AI-native interface to Microsoft 365 work intelligence.
 
-| Sample | Language | Protocol | Description |
-|--------|----------|----------|-------------|
-| [**dotnet/a2a/**](dotnet/a2a/) | C# | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | Interactive agent session using the open A2A protocol over JSON-RPC |
-| [**dotnet/rest/**](dotnet/rest/) | C# | REST | Interactive chat using the [Copilot Chat API](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview) with sync and streaming modes |
-| [**rust/a2a/**](rust/a2a/) | Rust | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | Interactive agent session with device code auth, token caching, and SSE streaming |
-
-## Swift Samples (`swift/`)
-
-| Sample | Protocol | Description |
-|--------|----------|-------------|
-| [**swift/a2a/**](swift/a2a/) | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | SwiftUI iOS/iPadOS chat app using A2A v0.3 with streaming responses |
-
-## Rust Samples (`rust/`)
-
-| Sample | Protocol | Description |
-|--------|----------|-------------|
-| [**rust/a2a/**](rust/a2a/) | [A2A (Agent-to-Agent)](https://a2a-protocol.org) | Interactive agent session with device code auth, token caching, and SSE streaming |
+| Sample | Language | Platform | Protocol | Description |
+|--------|----------|----------|----------|-------------|
+| [**dotnet/a2a/**](dotnet/a2a/) | C# | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Interactive agent session using the A2A protocol over JSON-RPC |
+| [**dotnet/a2a-raw/**](dotnet/a2a-raw/) | C# | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Same, but with raw `HttpClient` + JSON (no A2A SDK) |
+| [**dotnet/rest/**](dotnet/rest/) | C# | Windows, macOS, Linux | REST | Interactive chat using the [Copilot Chat API](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview) |
+| [**rust/a2a/**](rust/a2a/) | Rust | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Interactive agent session with device code auth and token caching |
+| [**swift/a2a/**](swift/a2a/) | Swift | iOS/iPadOS (macOS to build) | [A2A](https://a2a-protocol.org) | SwiftUI chat app with streaming responses |
 
 > **Current state**: Work IQ is accessed through the Microsoft Graph API at `graph.microsoft.com`. All samples use Graph endpoints and Graph authentication today.
 >
@@ -54,12 +44,15 @@ After adding permissions, click **Grant admin consent for [your tenant]**.
 
 ### 3. Language-specific SDKs
 
-- **dotnet/** samples: [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later
+- **dotnet/** samples: [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or later
 - **rust/** samples: [Rust toolchain](https://rustup.rs/) (stable)
+- **swift/** samples: [Xcode 26+](https://developer.apple.com/xcode/) (macOS only)
 
 ## Authentication
 
-### WAM (Windows Account Manager) — recommended on Windows (.NET only)
+All samples support multiple authentication methods. Choose the one that fits your platform:
+
+### WAM (Windows Account Manager) — Windows only, .NET samples
 
 Uses the Windows broker for silent SSO. No browser popup for returning users.
 
@@ -68,7 +61,11 @@ cd dotnet/a2a
 dotnet run -- --graph --token WAM --appid <your-app-client-id>
 ```
 
-### Device code flow — any platform (Rust)
+> **Note:** WAM is only available on Windows. On macOS and Linux, use a pre-obtained JWT token instead (see below).
+
+### Device code flow — all platforms (Rust, Swift)
+
+The Rust CLI and Swift app use device code flow, which works on any platform with a web browser.
 
 ```bash
 cd rust/a2a
@@ -76,12 +73,12 @@ cargo run -- --appid <your-app-client-id>
 # Follow the on-screen instructions to authenticate in a browser
 ```
 
-### Pre-obtained JWT token — any platform
+### Pre-obtained JWT token — all platforms, all samples
 
-Acquire a token externally (e.g., via [Graph Explorer](https://developer.microsoft.com/en-us/graph/graph-explorer), `az account get-access-token`, or your own MSAL code) and pass it directly:
+Acquire a token externally (e.g., via [Graph Explorer](https://developer.microsoft.com/en-us/graph/graph-explorer), `az account get-access-token`, or your own MSAL code) and pass it directly. This works on Windows, macOS, and Linux.
 
 ```bash
-# .NET
+# .NET samples
 cd dotnet/a2a
 dotnet run -- --graph --token eyJ0eXAiOiJKV1Qi...
 

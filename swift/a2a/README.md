@@ -25,7 +25,9 @@ The included scripts automate app registration. Pick whichever matches your envi
 ### macOS / Linux
 
 ```bash
-# Requires Azure CLI — install via: brew install azure-cli
+# Requires Azure CLI
+# macOS:  brew install azure-cli
+# Linux:  https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-linux
 az login
 ./setup-app-registration.sh
 ```
@@ -34,6 +36,7 @@ az login
 
 ```powershell
 # Requires Azure CLI
+# Install: winget install Microsoft.AzureCLI
 az login
 .\setup-app-registration.ps1
 ```

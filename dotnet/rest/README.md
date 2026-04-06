@@ -20,25 +20,33 @@ Supports both **synchronous** and **streaming** (SSE) modes.
 # Build
 dotnet build
 
-# Synchronous mode (default)
-dotnet run -- --token WAM --appid <your-app-client-id>
+# With a pre-obtained JWT token (any platform)
+dotnet run -- --graph --token eyJ0eXAiOiJKV1Qi...
+
+# With WAM broker auth (Windows only)
+dotnet run -- --graph --token WAM --appid <your-app-client-id>
 
 # Streaming mode (SSE)
-dotnet run -- --token WAM --appid <your-app-client-id> --stream
+dotnet run -- --graph --token WAM --appid <your-app-client-id> --stream
 
 # With account hint
-dotnet run -- --token WAM --appid <your-app-client-id> --account user@contoso.com
+dotnet run -- --graph --token WAM --appid <your-app-client-id> --account user@contoso.com
 ```
+
+> **macOS / Linux users:** WAM is only available on Windows. Use `--token <JWT>` with a pre-obtained token instead. See the [root README](../../README.md#authentication) for how to acquire a token.
 
 ## Parameters
 
 | Flag | Description |
 |------|-------------|
+| `--graph` | Use Microsoft Graph API (required) |
 | `--token`, `-t` | Bearer JWT token, or `WAM` for Windows broker auth |
 | `--appid`, `-a` | Azure AD app client ID (required with `--token WAM`) |
 | `--account` | Account hint for WAM (e.g. `user@contoso.com`) |
 | `--stream` | Use streaming mode (`/chatOverStream` with SSE) |
 | `--show-token` | Print the raw JWT after decoding |
+| `-v`, `--verbosity` | `0` = response only, `1` = default, `2` = full wire diagnostics |
+| `--header`, `-H` | Custom HTTP header in `Key: Value` format (repeatable) |
 
 ## How it works
 

@@ -17,15 +17,20 @@ The **Agent-to-Agent (A2A) Protocol** is an open standard for communication betw
 # Build
 dotnet build
 
-# Run (sync mode)
+# With a pre-obtained JWT token (any platform)
+dotnet run -- --graph --token eyJ0eXAiOiJKV1Qi...
+
+# With WAM broker auth (Windows only)
 dotnet run -- --graph --token WAM --appid <your-app-client-id>
 
-# Run (streaming mode — SSE via message/stream)
+# Streaming mode
 dotnet run -- --graph --token WAM --appid <your-app-client-id> --stream
 
 # With account hint
 dotnet run -- --graph --token WAM --appid <your-app-client-id> --account user@contoso.com
 ```
+
+> **macOS / Linux users:** WAM is only available on Windows. Use `--token <JWT>` with a pre-obtained token instead. See the [root README](../../README.md#authentication) for how to acquire a token.
 
 ## Parameters
 
