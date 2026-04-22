@@ -20,7 +20,7 @@ using Microsoft.Identity.Client.Broker;
 
 // ── Parse args ──────────────────────────────────────────────────────────
 
-string? endpoint = null, token = null, appId = null, account = null;
+string? endpoint = null, token = null, appId = null, account = null, scope = null, tenant = null;
 bool stream = false, allHeaders = false;
 
 for (int i = 0; i < args.Length; i++)
@@ -31,6 +31,8 @@ for (int i = 0; i < args.Length; i++)
         case "--token" or "-t": token = args[++i]; break;
         case "--appid" or "-a": appId = args[++i]; break;
         case "--account": account = args[++i]; break;
+        case "--scope" or "-s": scope = args[++i]; break;
+        case "--tenant" or "-T": tenant = args[++i]; break;
         case "--stream": stream = true; break;
         case "--all-headers": allHeaders = true; break;
         default:
@@ -39,6 +41,9 @@ for (int i = 0; i < args.Length; i++)
             return;
     }
 }
+
+// Default to Graph audience; override with --scope for WorkIQ or other gateways
+scope ??= "https://graph.microsoft.com/.default";
 
 if (string.IsNullOrEmpty(endpoint) || string.IsNullOrEmpty(token))
 {
@@ -59,7 +64,7 @@ if (token.Equals("WAM", StringComparison.OrdinalIgnoreCase))
         return;
     }
 
-    var (tok, app, acct) = await AcquireToken(appId, account);
+    var (tok, app, acct) = await AcquireToken(appId, account, scope, tenant);
     token = tok;
     msalApp = app;
     msalAccount = acct;
@@ -94,7 +99,7 @@ while (true)
         try
         {
             var result = await msalApp.AcquireTokenSilent(
-                new[] { "https://graph.microsoft.com/.default" }, msalAccount).ExecuteAsync();
+                new[] { scope }, msalAccount).ExecuteAsync();
             token = result.AccessToken;
             http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         }
@@ -351,11 +356,14 @@ bool TryGetParts(JsonElement el, out string text)
 // ── WAM auth ─────────────────────────────────────────────────────────────
 
 async Task<(string token, IPublicClientApplication app, IAccount? account)> AcquireToken(
-    string clientId, string? accountHint)
+    string clientId, string? accountHint, string scope, string? tenantId)
 {
+    var authority = string.IsNullOrEmpty(tenantId)
+        ? "https://login.microsoftonline.com/common"
+        : $"https://login.microsoftonline.com/{tenantId}";
     var builder = PublicClientApplicationBuilder.Create(clientId)
         .WithDefaultRedirectUri()
-        .WithAuthority("https://login.microsoftonline.com/common");
+        .WithAuthority(authority);
 
     if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
     {
@@ -363,7 +371,7 @@ async Task<(string token, IPublicClientApplication app, IAccount? account)> Acqu
     }
 
     var app = builder.Build();
-    var scopes = new[] { "https://graph.microsoft.com/.default" };
+    var scopes = new[] { scope };
 
     AuthenticationResult result;
     try
@@ -446,11 +454,16 @@ void PrintUsage()
     Options:
       --appid, -a      App client ID (required with WAM)
       --account        Account hint (e.g., user@contoso.com)
+      --tenant, -T     Tenant ID or domain (required with WAM for single-tenant apps;
+                       defaults to 'common' for multi-tenant apps)
+      --scope, -s      Token scope for WAM (default: https://graph.microsoft.com/.default;
+                       for WorkIQ Gateway use: api://workiq.svc.cloud.microsoft/.default)
       --stream         Use streaming mode (SSE via message/stream)
       --all-headers    Print all response headers (default: key diagnostics only)
 
     Examples:
       dotnet run -- -e https://graph.microsoft.com/rp/workiq/ -t WAM -a <appid>
       dotnet run -- -e https://graph.microsoft.com/rp/workiq/ -t eyJ0eXAi... --stream
+      dotnet run -- -e https://workiq.svc.cloud.microsoft/ -t WAM -a <appid> -s api://workiq.svc.cloud.microsoft/.default
     """);
 }
