@@ -12,19 +12,25 @@ using System.Text.Json;
 using Microsoft.Identity.Client;
 using Microsoft.Identity.Client.Broker;
 
-const string GraphBase = "https://graph.microsoft.com/beta/copilot";
-// WorkIQ Gateway routes REST traffic under /rest/* (AGS Slice R strips the /rest prefix
-// before forwarding to the backend). A2A lives under /a2a/*. See AGS domain config.
-const string WorkIQDefaultBase = "https://workiq.svc.cloud.microsoft/rest/beta/copilot";
+// Per-gateway (host, path) defaults. --endpoint overrides only the host
+// (scheme + authority); the path is fixed per gateway by its routing convention.
+const string GraphHost = "https://graph.microsoft.com";
+const string GraphPath = "/beta/copilot";
+const string WorkIQDefaultHost = "https://workiq.svc.cloud.microsoft";
+// WorkIQ Gateway multiplexes REST/A2A/MCP at one host via path prefix (/rest, /a2a, /tools).
+// AGS Slice R strips the /rest prefix before forwarding.
+const string WorkIQPath = "/rest/beta";
 
 var config = ParseArgs(args);
 if (config == null) return;
 
-// Base URL precedence: --endpoint override > gateway preset default.
-// Endpoint is expected to be the full "/beta/copilot" base; trailing slash optional.
-var apiBase = !string.IsNullOrEmpty(config.Endpoint)
+var (defaultHost, gatewayPath) = config.Gateway == "workiq"
+    ? (WorkIQDefaultHost, WorkIQPath)
+    : (GraphHost, GraphPath);
+var host = !string.IsNullOrEmpty(config.Endpoint)
     ? config.Endpoint.TrimEnd('/')
-    : (config.Gateway == "workiq" ? WorkIQDefaultBase : GraphBase);
+    : defaultHost;
+var apiBase = host + gatewayPath;
 
 string token;
 IPublicClientApplication? msalApp = null;
@@ -432,7 +438,9 @@ static Config? ParseArgs(string[] args)
                                defaults to 'common' for multi-tenant apps)
 
             Options:
-              --endpoint, -e   Override the gateway base URL (full '/beta/copilot' base)
+              --endpoint, -e   Override the gateway host (scheme + authority only, no path).
+                               The gateway-specific path (/beta/copilot for Graph,
+                               /rest/beta for WorkIQ) is appended automatically.
               --header, -H     Custom HTTP header in 'Key: Value' format (repeatable)
               --stream         Use streaming mode (SSE via /chatOverStream)
               --show-token     Print the raw JWT token (for reuse)
@@ -442,7 +450,7 @@ static Config? ParseArgs(string[] args)
               dotnet run -- --graph --token WAM --appid <your-app-id>
               dotnet run -- --graph --token WAM --appid <your-app-id> --stream
               dotnet run -- --workiq --token WAM --appid <your-app-id>
-              dotnet run -- --workiq --endpoint https://test.workiq.svc.cloud.dev.microsoft/beta/copilot --token WAM --appid <your-app-id>
+              dotnet run -- --workiq --endpoint https://test.workiq.svc.cloud.dev.microsoft --token WAM --appid <your-app-id>
               dotnet run -- --graph --token eyJ0eXAi...
             """);
         return null;

@@ -308,7 +308,9 @@ static Config? ParseArgs(string[] args)
                                defaults to 'common' for multi-tenant apps)
 
             Options:
-              --endpoint, -e   Override default gateway endpoint
+              --endpoint, -e   Override the gateway host (scheme + authority only, no path).
+                               The gateway-specific path (/rp/workiq/ for Graph, /a2a/ for
+                               WorkIQ) is preserved automatically.
               --header, -H     Custom HTTP header in 'Key: Value' format (repeatable)
               --show-token     Print the raw JWT token (for reuse with --token)
               --stream         Use streaming mode (SSE via message/stream)
@@ -319,7 +321,7 @@ static Config? ParseArgs(string[] args)
               dotnet run -- --graph --token WAM --appid <your-app-id> --account user@contoso.com
               dotnet run -- --graph --token eyJ0eXAi...
               dotnet run -- --workiq --token WAM --appid <your-app-id>
-              dotnet run -- --workiq --endpoint https://test.workiq.svc.cloud.dev.microsoft/ --token WAM --appid <your-app-id>
+              dotnet run -- --workiq --endpoint https://test.workiq.svc.cloud.dev.microsoft --token WAM --appid <your-app-id>
             """);
         return null;
     }
@@ -339,7 +341,10 @@ static Config? ParseArgs(string[] args)
     var gw = graph ? Gateways.Graph : Gateways.WorkIQ;
     if (!string.IsNullOrEmpty(endpoint))
     {
-        gw = gw with { Endpoint = endpoint };
+        // --endpoint is host-only (scheme + authority). Preserve the gateway's path.
+        var hostUri = new Uri(endpoint.TrimEnd('/'));
+        var presetPath = new Uri(gw.Endpoint).AbsolutePath;
+        gw = gw with { Endpoint = $"{hostUri.Scheme}://{hostUri.Authority}{presetPath}" };
     }
 
     if (headers.Count > 0)

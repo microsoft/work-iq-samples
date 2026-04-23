@@ -42,10 +42,12 @@ for (int i = 0; i < args.Length; i++)
     }
 }
 
-// Default to Graph audience; override with --scope for WorkIQ or other gateways
-scope ??= "https://graph.microsoft.com/.default";
+// Defaults target the WorkIQ Gateway (A2A endpoint + matching scope).
+// To target Graph RP instead, override both --endpoint and --scope.
+endpoint ??= "https://workiq.svc.cloud.microsoft/a2a/";
+scope ??= "api://workiq.svc.cloud.microsoft/.default";
 
-if (string.IsNullOrEmpty(endpoint) || string.IsNullOrEmpty(token))
+if (string.IsNullOrEmpty(token))
 {
     PrintUsage();
     return;
@@ -445,25 +447,36 @@ void PrintUsage()
     Work IQ A2A Raw Sample — minimal A2A client, no SDK (JSON-RPC v0.3 wire format)
 
     Usage:
-      dotnet run -- --endpoint <url> --token <JWT|WAM> [options]
+      dotnet run -- --token <JWT|WAM> [options]
 
     Required:
-      --endpoint, -e   Agent URL (e.g., https://graph.microsoft.com/rp/workiq/)
       --token, -t      Bearer JWT token, or 'WAM' for Windows broker auth
 
     Options:
+      --endpoint, -e   Agent URL. Defaults to the WorkIQ Gateway A2A endpoint:
+                       https://workiq.svc.cloud.microsoft/a2a/
+                       Override to target other rings (e.g., ppe./test.) or Graph RP.
+      --scope, -s      Token scope for WAM. Defaults to the WorkIQ audience:
+                       api://workiq.svc.cloud.microsoft/.default
+                       For Graph RP use: https://graph.microsoft.com/.default
       --appid, -a      App client ID (required with WAM)
       --account        Account hint (e.g., user@contoso.com)
       --tenant, -T     Tenant ID or domain (required with WAM for single-tenant apps;
                        defaults to 'common' for multi-tenant apps)
-      --scope, -s      Token scope for WAM (default: https://graph.microsoft.com/.default;
-                       for WorkIQ Gateway use: api://workiq.svc.cloud.microsoft/.default)
       --stream         Use streaming mode (SSE via message/stream)
       --all-headers    Print all response headers (default: key diagnostics only)
 
     Examples:
-      dotnet run -- -e https://graph.microsoft.com/rp/workiq/ -t WAM -a <appid>
+      # WorkIQ Gateway (uses defaults)
+      dotnet run -- -t WAM -a <appid>
+
+      # WorkIQ PPE ring (PFT path)
+      dotnet run -- -e https://ppe.workiq.svc.cloud.dev.microsoft/a2a/ -t WAM -a <appid>
+
+      # Graph RP (override both)
+      dotnet run -- -e https://graph.microsoft.com/rp/workiq/ -s https://graph.microsoft.com/.default -t WAM -a <appid>
+
+      # With a pre-obtained JWT
       dotnet run -- -e https://graph.microsoft.com/rp/workiq/ -t eyJ0eXAi... --stream
-      dotnet run -- -e https://workiq.svc.cloud.microsoft/ -t WAM -a <appid> -s api://workiq.svc.cloud.microsoft/.default
     """);
 }

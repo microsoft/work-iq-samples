@@ -15,8 +15,10 @@ A SwiftUI iOS/iPadOS app for chatting with [Microsoft Work IQ](https://aka.ms/wo
 
 - **Xcode 26+** (Swift 6.0)
 - iOS/iPadOS 26+ device or simulator
-- A Microsoft 365 account with access to Work IQ
+- A Microsoft 365 Copilot license on your test user
 - An Azure AD app registration (see [Setup](#azure-ad-app-registration) below)
+
+> **Admin setup note**: For multi-language testing (e.g., this sample + the .NET samples sharing one app registration), see the unified [`../../ADMIN_SETUP.md`](../../ADMIN_SETUP.md) and `scripts/admin-setup.{sh,ps1}` at the repo root. The setup script in this folder (`setup-app-registration.{sh,ps1}`) is iOS-specific — it adds the iOS redirect URI (`msauth.app.blueglass.A2A-Chat://auth`) needed by MSAL on iOS, and generates `Configuration.plist`. Run it after the unified script (or instead of, if you only need the iOS app).
 
 ## Azure AD App Registration
 

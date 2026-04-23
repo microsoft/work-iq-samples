@@ -2,102 +2,153 @@
 
 A bare-minimum A2A client using only `HttpClient` and `System.Text.Json` — **no A2A SDK**. Shows exactly what goes over the wire when talking to a Work IQ agent.
 
-This sample **calls the agent endpoint directly** — no agent card retrieval, no agent discovery, no capability negotiation. It assumes you know the agent's URL and sends messages to it. The default endpoint targets the **Microsoft 365 Copilot** agent via Graph RP.
+This sample **calls the agent endpoint directly** — no agent card retrieval, no discovery, no capability negotiation. It assumes you already know the agent URL and sends JSON-RPC v0.3 messages to it.
 
-> **Protocol version**: This sample uses the **A2A v0.3 JSON-RPC wire format**, which is what the Work IQ server currently supports. The A2A spec has since moved to v1.0 with a REST-style API (different URL paths, no JSON-RPC envelope). This sample will be updated to v1.0 when the server is upgraded.
+Defaults target the **Work IQ Gateway** (`https://workiq.svc.cloud.microsoft/a2a/`). Use `--endpoint` + `--scope` to target Microsoft Graph or any other A2A endpoint.
 
-Use this sample when you want to understand the A2A protocol at the HTTP level, or when you don't want to take a dependency on the [A2A .NET SDK](https://github.com/a2aproject/a2a-dotnet).
+For the SDK-based sample with agent-card handling, see [`../a2a/`](../a2a/).
 
-> **Prerequisites, authentication setup, and common issues** are covered in the [root README](../../README.md). Read that first.
+## Prerequisites
 
-## What's different from the `a2a/` sample?
-
-| | `a2a/` (SDK) | `a2a-raw/` (this sample) |
-|--|-------------|--------------------------|
-| **Dependencies** | A2A NuGet SDK + MSAL | MSAL only |
-| **Protocol handling** | SDK manages JSON-RPC, SSE parsing, types | Raw `HttpClient` + `JsonDocument` |
-| **Lines of code** | ~480 | ~280 |
-| **Best for** | Production apps, full A2A features | Learning, debugging, minimal integration |
+1. **Microsoft 365 Copilot license** on your test user.
+2. **An Entra app registration** configured with the right permissions and redirect URIs. One-time task.
+   - If you're the tenant admin:
+     ```bash
+     # Bash
+     ../../scripts/admin-setup.sh --workiq    # or --graph or --both
+     # PowerShell
+     ..\..\scripts\admin-setup.ps1 -Gateway WorkIQ
+     ```
+   - Otherwise, hand [`../../ADMIN_SETUP.md`](../../ADMIN_SETUP.md) to your admin. They'll give you an **App ID** and **Tenant ID**.
+3. **.NET 8 SDK** or later — [download](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ## Quick start
 
+### Against the Work IQ Gateway (default — prod host)
+
 ```bash
-dotnet build
-
-# Sync mode
-dotnet run -- --endpoint https://graph.microsoft.com/rp/workiq/ --token WAM --appid <your-app-id>
-
-# Streaming mode (SSE)
-dotnet run -- --endpoint https://graph.microsoft.com/rp/workiq/ --token WAM --appid <your-app-id> --stream
-
-# With a pre-obtained token
-dotnet run -- --endpoint https://graph.microsoft.com/rp/workiq/ --token eyJ0eXAi...
+dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
 ```
 
-## Parameters
+Type a message, see a response, type `quit` to exit.
+
+### Against the Work IQ Gateway, a specific ring (e.g., `ppe.`)
+
+```bash
+dotnet run -- --endpoint https://ppe.workiq.svc.cloud.dev.microsoft/a2a/ \
+  --token WAM --appid <APP_ID> --tenant <TENANT_ID>
+```
+
+The raw sample takes the **full URL** in `--endpoint` (including the `/a2a/` path) — unlike the SDK sample, there are no gateway presets.
+
+### Against Microsoft Graph
+
+```bash
+dotnet run -- --endpoint https://graph.microsoft.com/rp/workiq/ \
+  --scope https://graph.microsoft.com/.default \
+  --token WAM --appid <APP_ID> --tenant <TENANT_ID>
+```
+
+For Graph, override **both** `--endpoint` (path is different) and `--scope` (audience is Graph, not Work IQ).
+
+### Streaming mode
+
+Add `--stream` to switch from `message/send` to `message/stream`.
+
+## Expected output
+
+```
+Connected to: https://workiq.svc.cloud.microsoft/a2a/
+Mode: sync (message/send)
+Type a message. 'quit' to exit.
+
+You > What's on my schedule today?
+Agent > Today you have:
+  - 9:00 AM — team standup
+  - 11:00 AM — review with Dana
+  - 2:00 PM — customer call
+  [200 OK]
+  request-id: a1b2c3d4-...
+  x-ms-ags-diagnostic: {"ServerInfo":{"DataCenter":"...","Slice":"R"}}
+
+You > quit
+```
+
+## Flags
 
 | Flag | Description |
 |------|-------------|
-| `--endpoint`, `-e` | Agent URL (required) |
-| `--token`, `-t` | Bearer JWT token, or `WAM` for Windows broker auth |
-| `--appid`, `-a` | App client ID (required with WAM) |
-| `--account` | Account hint (e.g., `user@contoso.com`) |
-| `--stream` | Use streaming mode (SSE via `message/stream`) |
+| `--token, -t` | `WAM` for Windows broker auth, or a pre-obtained JWT string. **Required.** |
+| `--endpoint, -e` | Full agent URL. Default: `https://workiq.svc.cloud.microsoft/a2a/` |
+| `--scope, -s` | Token scope for WAM. Default: `api://workiq.svc.cloud.microsoft/.default`. For Graph use `https://graph.microsoft.com/.default`. |
+| `--appid, -a` | Entra app client ID (required with `WAM`) |
+| `--tenant, -T` | Tenant ID or domain. Required with `WAM` for single-tenant apps; defaults to `common` for multi-tenant. |
+| `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
+| `--stream` | Use streaming mode (`message/stream` via SSE) |
+| `--all-headers` | Print every response header (default: only diagnostic ones) |
 
-## What goes over the wire
+## Wire format (what you'll see with a packet capture)
 
-The server uses **A2A v0.3** which is JSON-RPC based. All requests POST to the base URL with the method inside the JSON-RPC body.
-
-### Sync: `POST` with method `message/send`
+### Request body — sync (`message/send`)
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": "unique-request-id",
+  "id": "<uuid>",
   "method": "message/send",
   "params": {
     "message": {
       "kind": "message",
       "role": "user",
-      "messageId": "guid",
-      "parts": [{ "kind": "text", "text": "What meetings do I have today?" }],
+      "messageId": "<uuid>",
       "contextId": null,
-      "metadata": { "Location": { "timeZoneOffset": -480, "timeZone": "America/Los_Angeles" } }
+      "parts": [{ "kind": "text", "text": "hello" }],
+      "metadata": {
+        "Location": { "timeZoneOffset": 480, "timeZone": "Pacific Standard Time" }
+      }
     }
   }
 }
 ```
 
-Response is a JSON-RPC response with `result` containing the agent's message and `contextId` for multi-turn.
+### Response — `AgentMessage`
 
-### Streaming: `POST` with method `message/stream`
-
-Same JSON-RPC request with `"method": "message/stream"`. Response is `text/event-stream` (SSE) where each event is a JSON-RPC response:
-
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "<matches request id>",
+  "result": {
+    "kind": "message",
+    "role": "agent",
+    "contextId": "<uuid — use on next turn>",
+    "parts": [{ "kind": "text", "text": "Today you have: ..." }],
+    "metadata": {
+      "attributions": [
+        { "attributionType": "citation", "seeMoreWebUrl": "https://..." }
+      ]
+    }
+  }
+}
 ```
-data: {"jsonrpc":"2.0","id":"...","result":{"status":{"state":"working","message":{"parts":[{"kind":"text","text":"You"}]}},"contextId":"ctx-1"}}
-data: {"jsonrpc":"2.0","id":"...","result":{"status":{"state":"working","message":{"parts":[{"kind":"text","text":"You have"}]}},"contextId":"ctx-1"}}
-data: {"jsonrpc":"2.0","id":"...","result":{"status":{"state":"completed","message":{"parts":[{"kind":"text","text":"You have 3 meetings..."}]}},"contextId":"ctx-1"}}
-```
 
-Text accumulates across events (not incremental deltas). The sample diffs against the previous text to print only new content.
+### Streaming — `message/stream`
 
-### Key v0.3 protocol details
+Same request body with `"method": "message/stream"`. Response is `text/event-stream`; each event's `data:` line contains a JSON-RPC frame with `TaskStatusUpdateEvent` payloads. The sample accumulates `parts[*].text` across events.
 
-- **JSON-RPC envelope required**: Every request must include `jsonrpc`, `id`, `method`, `params`
-- **POST to base URL**: The method (`message/send`, `message/stream`) is inside the body, not in the URL path
-- **`kind` discriminators required**: Messages need `"kind": "message"`, parts need `"kind": "text"` — server rejects without these
+## Sample-specific troubleshooting
 
-## NuGet dependencies
+| Symptom | Fix |
+|---------|-----|
+| `400 Invalid request, no valid route` | Your `--endpoint` path doesn't match a gateway-registered scope. Use `/a2a/` for Work IQ, `/rp/workiq/` for Graph. |
+| `401 Unauthorized` | Token `aud` doesn't match the endpoint. Work IQ needs `api://workiq.svc.cloud.microsoft/.default`; Graph needs `https://graph.microsoft.com/.default`. |
+| `403 Forbidden` without a scope message | User is missing the Microsoft 365 Copilot license. |
 
-| Package | Purpose |
-|---------|---------|
-| `Microsoft.Identity.Client` | MSAL token acquisition |
-| `Microsoft.Identity.Client.Broker` | Windows WAM broker |
+See the [root README](../../README.md#troubleshooting) for the full troubleshooting matrix.
 
-That's it — no A2A SDK, no JWT decoder, no Graph SDK.
+## Why use this sample?
 
-## Resources
+- **Debugging wire issues** — see exactly what the SDK sends, without indirection.
+- **Porting to another language** — `Program.cs` is ~400 lines and does no magic; easy to translate.
+- **Custom transport** — replace `HttpClient` with another HTTP library without wrestling with SDK abstractions.
 
-- [A2A Protocol Specification](https://a2a-protocol.org/latest/specification/)
-- [Work IQ Overview](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/workiq-overview)
+For production client code, prefer the SDK-based sample ([`../a2a/`](../a2a/)) unless you have a specific reason not to.
