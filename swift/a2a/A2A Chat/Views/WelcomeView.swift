@@ -19,7 +19,7 @@ struct WelcomeView: View {
                 .font(.system(size: 64))
                 .foregroundStyle(.blue)
 
-            Text("Work IQ")
+            Text("A2A Chat")
                 .font(.largeTitle.bold())
 
             Text("AI-powered assistant\nfor Microsoft 365")

@@ -1,4 +1,4 @@
-// WorkIQ REST Sample — Interactive Copilot Chat via Microsoft Graph or WorkIQ Gateway
+// WorkIQ REST Sample — Interactive Copilot Chat via Microsoft Graph or Work IQ Gateway
 // Supports both synchronous (/chat) and streaming (/chatOverStream) modes.
 // Usage: dotnet run -- <--graph|--workiq> --token <JWT|WAM> --appid <clientId> [--endpoint <url>] [--stream] [--account <email>]
 // Docs:  https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview
@@ -17,7 +17,7 @@ using Microsoft.Identity.Client.Broker;
 const string GraphHost = "https://graph.microsoft.com";
 const string GraphPath = "/beta/copilot";
 const string WorkIQDefaultHost = "https://workiq.svc.cloud.microsoft";
-// WorkIQ Gateway multiplexes REST/A2A/MCP at one host via path prefix (/rest, /a2a, /tools).
+// Work IQ Gateway multiplexes REST/A2A/MCP at one host via path prefix (/rest, /a2a, /tools).
 // AGS Slice R strips the /rest prefix before forwarding.
 const string WorkIQPath = "/rest/beta";
 
@@ -299,19 +299,7 @@ async Task ChatStream(HttpClient client, string convId, string message)
     }
 }
 
-static string BuildChatBody(string message)
-{
-    // Graph API requires IANA timezone (e.g. "America/Los_Angeles"), not Windows (e.g. "Pacific Standard Time")
-    string tz;
-    try { tz = TimeZoneInfo.Local.HasIanaId ? TimeZoneInfo.Local.Id : TimeZoneInfo.TryConvertWindowsIdToIanaId(TimeZoneInfo.Local.Id, out var iana) ? iana : "UTC"; }
-    catch { tz = "UTC"; }
-
-    return JsonSerializer.Serialize(new
-    {
-        message = new { text = message },
-        locationHint = new { timeZone = tz },
-    });
-}
+static string BuildChatBody(string message) => WorkIQ.Rest.Helpers.BuildChatBody(message);
 
 // ── WAM auth ─────────────────────────────────────────────────────────────
 
@@ -396,39 +384,29 @@ static void DecodeToken(string token)
 
 static Config? ParseArgs(string[] args)
 {
-    string? token = null, appId = null, account = null, endpoint = null, tenant = null;
-    bool graph = false, workiq = false, stream = false, showToken = false;
-    int verbosity = 1;
-    var headers = new List<string>();
+    var a = WorkIQ.Rest.Helpers.ParseArgs(args);
 
-    for (int i = 0; i < args.Length; i++)
+    if (a.Error != null)
     {
-        switch (args[i])
-        {
-            case "--graph": graph = true; break;
-            case "--workiq": workiq = true; break;
-            case "--token" or "-t": token = args[++i]; break;
-            case "--appid" or "-a": appId = args[++i]; break;
-            case "--account": account = args[++i]; break;
-            case "--tenant" or "-T": tenant = args[++i]; break;
-            case "--endpoint" or "-e": endpoint = args[++i]; break;
-            case "--stream": stream = true; break;
-            case "--show-token": showToken = true; break;
-            case "--verbosity" or "-v": verbosity = int.Parse(args[++i]); break;
-            case "--header" or "-H": headers.Add(args[++i]); break;
-        }
+        Ink($"ERROR: {a.Error}\n", ConsoleColor.Red);
+        return null;
     }
+
+    string? token = a.Token, appId = a.AppId, account = a.Account, endpoint = a.Endpoint, tenant = a.Tenant;
+    bool graph = a.Graph, workiq = a.Workiq, stream = a.Stream, showToken = a.ShowToken;
+    int verbosity = a.Verbosity;
+    var headers = a.Headers;
 
     if (string.IsNullOrEmpty(token) || (!graph && !workiq))
     {
         Console.WriteLine("""
-            WorkIQ REST Sample — Interactive Copilot Chat via Microsoft Graph
+            WorkIQ REST Sample — Interactive Copilot Chat via Microsoft Graph or Work IQ Gateway
 
             Usage: dotnet run -- <gateway> --token <JWT|WAM> --appid <clientId> [options]
 
             Gateway (exactly one required):
               --graph          Use Microsoft Graph API
-              --workiq         Use WorkIQ Gateway (default: workiq.svc.cloud.microsoft)
+              --workiq         Use Work IQ Gateway (default: workiq.svc.cloud.microsoft)
 
             Auth:
               --token, -t      Bearer token or 'WAM' for Windows broker auth
@@ -440,7 +418,7 @@ static Config? ParseArgs(string[] args)
             Options:
               --endpoint, -e   Override the gateway host (scheme + authority only, no path).
                                The gateway-specific path (/beta/copilot for Graph,
-                               /rest/beta for WorkIQ) is appended automatically.
+                               /rest/beta for Work IQ) is appended automatically.
               --header, -H     Custom HTTP header in 'Key: Value' format (repeatable)
               --stream         Use streaming mode (SSE via /chatOverStream)
               --show-token     Print the raw JWT token (for reuse)
@@ -496,7 +474,7 @@ static void LogWire(string method, string url, string? body, HttpResponseMessage
     Console.ResetColor();
 }
 
-static string Trunc(string s, int max) => s.Length <= max ? s : $"{s[..max]}...";
+static string Trunc(string s, int max) => WorkIQ.Rest.Helpers.Trunc(s, max);
 
 [DllImport("kernel32.dll", EntryPoint = "GetConsoleWindow")] static extern IntPtr Win32GetConsoleWindow();
 [DllImport("user32.dll", ExactSpelling = true)] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
@@ -514,18 +492,7 @@ class DiagnosticHandler : DelegatingHandler
     {
         var res = await base.SendAsync(req, ct);
 
-        if (Verbosity >= 3)
-        {
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine($"  ◀ {(int)res.StatusCode} {res.StatusCode}");
-            foreach (var h in res.Headers)
-                Console.WriteLine($"    {h.Key}: {string.Join(", ", h.Value)}");
-            if (res.Content != null)
-                foreach (var h in res.Content.Headers)
-                    Console.WriteLine($"    {h.Key}: {string.Join(", ", h.Value)}");
-            Console.ResetColor();
-        }
-        else if (Verbosity >= 2)
+        if (Verbosity >= 2)
         {
             // Full wire logging handled by LogWire at call sites
         }

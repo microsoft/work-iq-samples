@@ -4,7 +4,7 @@ mod config;
 
 use a2a::WorkIQClient;
 use a2a_rs_core::{Message, Part, Role, SendMessageConfiguration, SendMessageResult, StreamingMessageResult};
-use auth::{decode_token, AuthManager, TokenCache};
+use auth::{decode_token, AuthManager};
 use clap::Parser;
 use colored::Colorize;
 use config::{Cli, Command, WORKIQ_AUTHORITY, WORKIQ_ENDPOINT, WORKIQ_SCOPES};
@@ -34,10 +34,10 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Login) => {
             require_app_id(&app_id)?;
             let mut mgr =
-                AuthManager::new(&app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, cli.account.as_deref());
+                AuthManager::new(&app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, cli.account.as_deref()).await?;
             let token = mgr.get_token(verbosity).await?;
             println!("\n{}", "Logged in successfully.".green().bold());
-            if let Some(acct) = mgr.cached_account() {
+            if let Some(acct) = mgr.cached_account().await {
                 println!("  Account: {}", acct.cyan());
             }
             if verbosity >= 1 {
@@ -47,44 +47,38 @@ async fn main() -> anyhow::Result<()> {
             return Ok(());
         }
         Some(Command::Logout) => {
-            TokenCache::clear()?;
-            println!("{}", "Logged out. Token cache cleared.".green());
+            require_app_id(&app_id)?;
+            let mgr =
+                AuthManager::new(&app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, None).await?;
+            mgr.sign_out_all().await?;
+            println!("{}", "Logged out.".green());
             return Ok(());
         }
         Some(Command::Status) => {
-            match TokenCache::load() {
-                Some(cache) => {
-                    println!("{}", "Cached session found.".green());
-                    println!("  Client ID: {}", cache.client_id.dimmed());
-                    if let Some(ref acct) = cache.account {
-                        println!("  Account:   {}", acct.cyan());
-                    }
-                    if cache.is_expired() {
-                        println!("  Token:     {}", "EXPIRED".red().bold());
-                        if cache.refresh_token.is_some() {
-                            println!(
-                                "  {}",
-                                "Refresh token available — will auto-renew on next use.".dimmed()
-                            );
-                        }
-                    } else {
-                        let remaining = cache.expires_at - chrono::Utc::now().timestamp();
-                        println!(
-                            "  Token:     {} ({}m {}s remaining)",
-                            "valid".green(),
-                            remaining / 60,
-                            remaining % 60
-                        );
-                    }
+            require_app_id(&app_id)?;
+            let mut mgr =
+                AuthManager::new(&app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, cli.account.as_deref()).await?;
+            if !mgr.has_accounts().await {
+                println!(
+                    "{}",
+                    "No cached session. Run `workiq-a2a login` to authenticate.".yellow()
+                );
+                return Ok(());
+            }
+            println!("{}", "Cached session found.".green());
+            println!("  Client ID: {}", app_id.dimmed());
+            if let Some(acct) = mgr.cached_account().await {
+                println!("  Account:   {}", acct.cyan());
+            }
+            match mgr.ensure_fresh(0).await {
+                Ok(token) => {
+                    decode_token(&token);
                     if cli.show_token {
-                        println!("\n  {}\n", cache.access_token);
+                        println!("\n  {token}\n");
                     }
                 }
-                None => {
-                    println!(
-                        "{}",
-                        "No cached session. Run `workiq-a2a login` to authenticate.".yellow()
-                    );
+                Err(_) => {
+                    println!("  Token:     {}", "expired or unavailable".yellow());
                 }
             }
             return Ok(());
@@ -98,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
     } else {
         require_app_id(&app_id)?;
         let mut mgr =
-            AuthManager::new(&app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, cli.account.as_deref());
+            AuthManager::new(&app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, cli.account.as_deref()).await?;
         let token = mgr.get_token(verbosity).await?;
         (token, Some(mgr))
     };
@@ -121,7 +115,7 @@ async fn main() -> anyhow::Result<()> {
         let mode = if cli.stream { "Streaming" } else { "Sync" };
         log_header(&format!("READY — Graph RP — {mode} — {endpoint}"));
         if let Some(ref mgr) = auth_mgr {
-            if let Some(acct) = mgr.cached_account() {
+            if let Some(acct) = mgr.cached_account().await {
                 println!("  Signed in as {}", acct.cyan());
             }
         }
@@ -581,5 +575,295 @@ impl Drop for Spinner {
         if let Some(h) = self.handle.take() {
             let _ = h.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── uuid_v4 ─────────────────────────────────────────────────────
+
+    #[test]
+    fn uuid_v4_format() {
+        let id = uuid_v4();
+        assert_eq!(id.len(), 32, "expected 32 hex chars, got {}", id.len());
+        assert!(
+            id.chars().all(|c| c.is_ascii_hexdigit()),
+            "non-hex char in: {id}"
+        );
+    }
+
+    #[test]
+    fn uuid_v4_uniqueness() {
+        let a = uuid_v4();
+        // Small sleep so the nanos-based ID advances
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        let b = uuid_v4();
+        assert_ne!(a, b, "IDs should differ with a time gap");
+    }
+
+    // ── build_message ───────────────────────────────────────────────
+
+    #[test]
+    fn build_message_structure() {
+        let msg = build_message(Role::User, "hello", None);
+        assert_eq!(msg.kind, "message");
+        assert_eq!(msg.role, Role::User);
+        assert_eq!(msg.parts.len(), 1);
+        match &msg.parts[0] {
+            Part::Text { text, .. } => assert_eq!(text, "hello"),
+            other => panic!("expected Text part, got {other:?}"),
+        }
+        assert!(msg.context_id.is_none());
+        assert_eq!(msg.message_id.len(), 32);
+    }
+
+    #[test]
+    fn build_message_with_context() {
+        let msg = build_message(Role::Agent, "reply", Some("ctx-42".into()));
+        assert_eq!(msg.context_id.as_deref(), Some("ctx-42"));
+        assert_eq!(msg.role, Role::Agent);
+    }
+
+    #[test]
+    fn build_message_has_location_metadata() {
+        let msg = build_message(Role::User, "test", None);
+        let meta = msg.metadata.as_ref().expect("metadata missing");
+        let loc = &meta["Location"];
+        assert!(loc.get("timeZoneOffset").is_some(), "missing timeZoneOffset");
+        assert!(loc.get("timeZone").is_some(), "missing timeZone");
+    }
+
+    // ── join_text_parts ─────────────────────────────────────────────
+
+    #[test]
+    fn join_text_parts_basic() {
+        let parts = vec![
+            Part::Text {
+                text: "hello".into(),
+                metadata: None,
+            },
+            Part::Text {
+                text: "world".into(),
+                metadata: None,
+            },
+        ];
+        assert_eq!(join_text_parts(&parts), "hello\nworld");
+    }
+
+    #[test]
+    fn join_text_parts_skips_non_text() {
+        let parts = vec![
+            Part::Text {
+                text: "a".into(),
+                metadata: None,
+            },
+            Part::Data {
+                data: serde_json::json!({}),
+                metadata: None,
+            },
+            Part::Text {
+                text: "b".into(),
+                metadata: None,
+            },
+        ];
+        assert_eq!(join_text_parts(&parts), "a\nb");
+    }
+
+    #[test]
+    fn join_text_parts_empty() {
+        assert_eq!(join_text_parts(&[]), "");
+    }
+
+    #[test]
+    fn join_text_parts_single() {
+        let parts = vec![Part::Text {
+            text: "only".into(),
+            metadata: None,
+        }];
+        assert_eq!(join_text_parts(&parts), "only");
+    }
+
+    // ── extract_result ──────────────────────────────────────────────
+
+    #[test]
+    fn extract_result_from_message() {
+        let msg = Message {
+            kind: "message".into(),
+            message_id: "m1".into(),
+            context_id: Some("ctx-1".into()),
+            task_id: None,
+            role: Role::Agent,
+            parts: vec![Part::Text {
+                text: "response".into(),
+                metadata: None,
+            }],
+            metadata: Some(serde_json::json!({"key": "val"})),
+            extensions: vec![],
+            reference_task_ids: None,
+        };
+        let result = SendMessageResult::Message(msg);
+        let (text, ctx, meta) = extract_result(&result);
+        assert_eq!(text, "response");
+        assert_eq!(ctx.as_deref(), Some("ctx-1"));
+        assert_eq!(meta.unwrap()["key"], "val");
+    }
+
+    #[test]
+    fn extract_result_from_task() {
+        let task = a2a_rs_core::Task {
+            kind: "task".into(),
+            id: "t1".into(),
+            context_id: "ctx-2".into(),
+            status: a2a_rs_core::TaskStatus {
+                state: a2a_rs_core::TaskState::Completed,
+                message: Some(Message {
+                    kind: "message".into(),
+                    message_id: "m2".into(),
+                    context_id: None,
+                    task_id: None,
+                    role: Role::Agent,
+                    parts: vec![Part::Text {
+                        text: "done".into(),
+                        metadata: None,
+                    }],
+                    metadata: Some(serde_json::json!({"cite": true})),
+                    extensions: vec![],
+                    reference_task_ids: None,
+                }),
+                timestamp: None,
+            },
+            artifacts: None,
+            history: None,
+            metadata: None,
+        };
+        let result = SendMessageResult::Task(task);
+        let (text, ctx, meta) = extract_result(&result);
+        assert_eq!(text, "done");
+        assert_eq!(ctx.as_deref(), Some("ctx-2"));
+        assert_eq!(meta.unwrap()["cite"], true);
+    }
+
+    #[test]
+    fn extract_result_task_without_message() {
+        let task = a2a_rs_core::Task {
+            kind: "task".into(),
+            id: "t2".into(),
+            context_id: "ctx-3".into(),
+            status: a2a_rs_core::TaskStatus {
+                state: a2a_rs_core::TaskState::Working,
+                message: None,
+                timestamp: None,
+            },
+            artifacts: None,
+            history: None,
+            metadata: None,
+        };
+        let result = SendMessageResult::Task(task);
+        let (text, ctx, _meta) = extract_result(&result);
+        assert!(text.contains("t2"), "expected task id in fallback: {text}");
+        assert!(text.contains("Working"), "expected state in fallback: {text}");
+        assert_eq!(ctx.as_deref(), Some("ctx-3"));
+    }
+
+    // ── print_delta ─────────────────────────────────────────────────
+
+    #[test]
+    fn print_delta_incremental() {
+        let mut prev = String::new();
+
+        // First call — entire text is new
+        print_delta("Hello", &mut prev);
+        assert_eq!(prev, "Hello");
+
+        // Second call — only " world" is new
+        print_delta("Hello world", &mut prev);
+        assert_eq!(prev, "Hello world");
+    }
+
+    #[test]
+    fn print_delta_full_replace() {
+        let mut prev = "old text".to_string();
+        // New text doesn't start with old — prints full new text
+        print_delta("completely new", &mut prev);
+        assert_eq!(prev, "completely new");
+    }
+
+    #[test]
+    fn print_delta_empty() {
+        let mut prev = String::new();
+        print_delta("", &mut prev);
+        assert_eq!(prev, "");
+    }
+
+    // ── edge-case tests ─────────────────────────────────────────────
+
+    #[test]
+    fn build_message_empty_text() {
+        let msg = build_message(Role::User, "", None);
+        assert_eq!(msg.parts.len(), 1);
+        match &msg.parts[0] {
+            Part::Text { text, .. } => assert_eq!(text, ""),
+            other => panic!("expected Text part, got {other:?}"),
+        }
+        assert_eq!(msg.kind, "message");
+    }
+
+    #[test]
+    fn build_message_special_characters() {
+        let input = "He said \"hello\"\nnew line\ttab 🚀 café";
+        let msg = build_message(Role::User, input, None);
+        match &msg.parts[0] {
+            Part::Text { text, .. } => assert_eq!(text, input),
+            other => panic!("expected Text part, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extract_result_from_task_completed_empty_message() {
+        let task = a2a_rs_core::Task {
+            kind: "task".into(),
+            id: "t-empty".into(),
+            context_id: "ctx-e".into(),
+            status: a2a_rs_core::TaskStatus {
+                state: a2a_rs_core::TaskState::Completed,
+                message: Some(Message {
+                    kind: "message".into(),
+                    message_id: "m-empty".into(),
+                    context_id: None,
+                    task_id: None,
+                    role: Role::Agent,
+                    parts: vec![], // no text parts
+                    metadata: None,
+                    extensions: vec![],
+                    reference_task_ids: None,
+                }),
+                timestamp: None,
+            },
+            artifacts: None,
+            history: None,
+            metadata: None,
+        };
+        let result = SendMessageResult::Task(task);
+        let (text, ctx, _meta) = extract_result(&result);
+        assert_eq!(text, "", "empty parts should produce empty string");
+        assert_eq!(ctx.as_deref(), Some("ctx-e"));
+    }
+
+    #[test]
+    fn join_text_parts_with_newlines_in_text() {
+        let parts = vec![
+            Part::Text {
+                text: "line1\nline2".into(),
+                metadata: None,
+            },
+            Part::Text {
+                text: "line3\nline4".into(),
+                metadata: None,
+            },
+        ];
+        // Parts are joined with \n, so embedded newlines are preserved alongside the separator.
+        assert_eq!(join_text_parts(&parts), "line1\nline2\nline3\nline4");
     }
 }

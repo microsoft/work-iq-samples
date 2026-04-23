@@ -6,7 +6,18 @@ This sample **calls the agent endpoint directly** — no agent card retrieval, n
 
 Defaults target the **Work IQ Gateway** (`https://workiq.svc.cloud.microsoft/a2a/`). Use `--endpoint` + `--scope` to target Microsoft Graph or any other A2A endpoint.
 
-For the SDK-based sample with agent-card handling, see [`../a2a/`](../a2a/).
+> **Protocol version**: This sample uses the **A2A v0.3 JSON-RPC wire format**, which is what the Work IQ server currently supports. The A2A spec has since moved to v1.0 with a REST-style API (different URL paths, no JSON-RPC envelope). This sample will be updated to v1.0 when the server is upgraded.
+
+Use this sample when you want to understand the A2A protocol at the HTTP level, or when you don't want to take a dependency on the [A2A .NET SDK](https://github.com/a2aproject/a2a-dotnet). For the SDK-based sample with agent-card handling, see [`../a2a/`](../a2a/).
+
+## What's different from the `a2a/` sample?
+
+| | `a2a/` (SDK) | `a2a-raw/` (this sample) |
+|--|-------------|--------------------------|
+| **Dependencies** | A2A NuGet SDK + MSAL | MSAL only |
+| **Protocol handling** | SDK manages JSON-RPC, SSE parsing, types | Raw `HttpClient` + `JsonDocument` |
+| **Lines of code** | ~480 | ~280 |
+| **Best for** | Production apps, full A2A features | Learning, debugging, minimal integration |
 
 ## Prerequisites
 
@@ -20,7 +31,7 @@ For the SDK-based sample with agent-card handling, see [`../a2a/`](../a2a/).
      ..\..\scripts\admin-setup.ps1 -Gateway WorkIQ
      ```
    - Otherwise, hand [`../../ADMIN_SETUP.md`](../../ADMIN_SETUP.md) to your admin. They'll give you an **App ID** and **Tenant ID**.
-3. **.NET 8 SDK** or later — [download](https://dotnet.microsoft.com/download/dotnet/8.0).
+3. **.NET 10 SDK** or later — [download](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ## Quick start
 
@@ -55,6 +66,14 @@ For Graph, override **both** `--endpoint` (path is different) and `--scope` (aud
 
 Add `--stream` to switch from `message/send` to `message/stream`.
 
+### With a pre-obtained JWT (any platform)
+
+```bash
+dotnet run -- --endpoint https://graph.microsoft.com/rp/workiq/ --token eyJ0eXAi...
+```
+
+> **macOS / Linux users:** WAM is only available on Windows. Use `--token <JWT>` with a pre-obtained token instead.
+
 ## Expected output
 
 ```
@@ -87,53 +106,58 @@ You > quit
 | `--stream` | Use streaming mode (`message/stream` via SSE) |
 | `--all-headers` | Print every response header (default: only diagnostic ones) |
 
-## Wire format (what you'll see with a packet capture)
+## What goes over the wire
 
-### Request body — sync (`message/send`)
+The server uses **A2A v0.3** which is JSON-RPC based. All requests POST to the base URL with the method inside the JSON-RPC body.
+
+### Sync: `POST` with method `message/send`
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": "<uuid>",
+  "id": "unique-request-id",
   "method": "message/send",
   "params": {
     "message": {
       "kind": "message",
       "role": "user",
-      "messageId": "<uuid>",
+      "messageId": "guid",
+      "parts": [{ "kind": "text", "text": "What meetings do I have today?" }],
       "contextId": null,
-      "parts": [{ "kind": "text", "text": "hello" }],
-      "metadata": {
-        "Location": { "timeZoneOffset": 480, "timeZone": "Pacific Standard Time" }
-      }
+      "metadata": { "Location": { "timeZoneOffset": -480, "timeZone": "America/Los_Angeles" } }
     }
   }
 }
 ```
 
-### Response — `AgentMessage`
+Response is a JSON-RPC response with `result` containing the agent's message and `contextId` for multi-turn.
 
-```json
-{
-  "jsonrpc": "2.0",
-  "id": "<matches request id>",
-  "result": {
-    "kind": "message",
-    "role": "agent",
-    "contextId": "<uuid — use on next turn>",
-    "parts": [{ "kind": "text", "text": "Today you have: ..." }],
-    "metadata": {
-      "attributions": [
-        { "attributionType": "citation", "seeMoreWebUrl": "https://..." }
-      ]
-    }
-  }
-}
+### Streaming: `POST` with method `message/stream`
+
+Same JSON-RPC request with `"method": "message/stream"`. Response is `text/event-stream` (SSE) where each event is a JSON-RPC response:
+
+```
+data: {"jsonrpc":"2.0","id":"...","result":{"status":{"state":"working","message":{"parts":[{"kind":"text","text":"You"}]}},"contextId":"ctx-1"}}
+data: {"jsonrpc":"2.0","id":"...","result":{"status":{"state":"working","message":{"parts":[{"kind":"text","text":"You have"}]}},"contextId":"ctx-1"}}
+data: {"jsonrpc":"2.0","id":"...","result":{"status":{"state":"completed","message":{"parts":[{"kind":"text","text":"You have 3 meetings..."}]}},"contextId":"ctx-1"}}
 ```
 
-### Streaming — `message/stream`
+Text accumulates across events (not incremental deltas). The sample diffs against the previous text to print only new content.
 
-Same request body with `"method": "message/stream"`. Response is `text/event-stream`; each event's `data:` line contains a JSON-RPC frame with `TaskStatusUpdateEvent` payloads. The sample accumulates `parts[*].text` across events.
+### Key v0.3 protocol details
+
+- **JSON-RPC envelope required**: Every request must include `jsonrpc`, `id`, `method`, `params`
+- **POST to base URL**: The method (`message/send`, `message/stream`) is inside the body, not in the URL path
+- **`kind` discriminators required**: Messages need `"kind": "message"`, parts need `"kind": "text"` — server rejects without these
+
+## NuGet dependencies
+
+| Package | Purpose |
+|---------|---------|
+| `Microsoft.Identity.Client` | MSAL token acquisition |
+| `Microsoft.Identity.Client.Broker` | Windows WAM broker |
+
+That's it — no A2A SDK, no JWT decoder, no Graph SDK.
 
 ## Sample-specific troubleshooting
 
@@ -145,10 +169,7 @@ Same request body with `"method": "message/stream"`. Response is `text/event-str
 
 See the [root README](../../README.md#troubleshooting) for the full troubleshooting matrix.
 
-## Why use this sample?
+## Resources
 
-- **Debugging wire issues** — see exactly what the SDK sends, without indirection.
-- **Porting to another language** — `Program.cs` is ~400 lines and does no magic; easy to translate.
-- **Custom transport** — replace `HttpClient` with another HTTP library without wrestling with SDK abstractions.
-
-For production client code, prefer the SDK-based sample ([`../a2a/`](../a2a/)) unless you have a specific reason not to.
+- [A2A Protocol Specification](https://a2a-protocol.org/latest/specification/)
+- [Work IQ Overview](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/workiq-overview)

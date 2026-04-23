@@ -424,6 +424,7 @@ DerivedData/
 
 # Rust build output
 rust/*/target/
+rust/*/Cargo.lock
 
 # OS
 .DS_Store

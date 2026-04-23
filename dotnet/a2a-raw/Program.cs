@@ -4,12 +4,12 @@
 // WorkIQ A2A Raw Sample — Minimal A2A client using only HttpClient + JSON
 // No A2A SDK. Shows exactly what goes over the wire (JSON-RPC v0.3 format).
 //
-// Usage:
-//   dotnet run -- --endpoint <agent-url> --token WAM --appid <client-id> [--account user@tenant.com] [--stream]
-//   dotnet run -- --endpoint <agent-url> --token <JWT> [--stream]
+// Defaults target the Work IQ Gateway (`https://workiq.svc.cloud.microsoft/a2a/`).
+// Override --endpoint + --scope to target Graph RP or any other A2A endpoint.
 //
-// Example (M365 Copilot via Graph RP):
-//   dotnet run -- --endpoint https://graph.microsoft.com/rp/workiq/ --token WAM --appid <id>
+// Usage:
+//   dotnet run -- --token <JWT|WAM> --appid <client-id> [--account user@tenant.com] [--stream]
+//   dotnet run -- --endpoint <agent-url> --token <JWT> [--stream]
 
 using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
@@ -17,35 +17,24 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Identity.Client;
 using Microsoft.Identity.Client.Broker;
+using WorkIQ.A2ARaw;
 
 // ── Parse args ──────────────────────────────────────────────────────────
 
-string? endpoint = null, token = null, appId = null, account = null, scope = null, tenant = null;
-bool stream = false, allHeaders = false;
-
-for (int i = 0; i < args.Length; i++)
+var parsed = Helpers.ParseArgs(args);
+if (parsed.Error != null)
 {
-    switch (args[i])
-    {
-        case "--endpoint" or "-e": endpoint = args[++i]; break;
-        case "--token" or "-t": token = args[++i]; break;
-        case "--appid" or "-a": appId = args[++i]; break;
-        case "--account": account = args[++i]; break;
-        case "--scope" or "-s": scope = args[++i]; break;
-        case "--tenant" or "-T": tenant = args[++i]; break;
-        case "--stream": stream = true; break;
-        case "--all-headers": allHeaders = true; break;
-        default:
-            Console.Error.WriteLine($"Unknown flag: {args[i]}");
-            PrintUsage();
-            return;
-    }
+    Console.Error.WriteLine(parsed.Error);
+    PrintUsage();
+    return;
 }
 
-// Defaults target the WorkIQ Gateway (A2A endpoint + matching scope).
+// Defaults target the Work IQ Gateway (A2A endpoint + matching scope).
 // To target Graph RP instead, override both --endpoint and --scope.
-endpoint ??= "https://workiq.svc.cloud.microsoft/a2a/";
-scope ??= "api://workiq.svc.cloud.microsoft/.default";
+string endpoint = parsed.Endpoint ?? "https://workiq.svc.cloud.microsoft/a2a/";
+string scope = parsed.Scope ?? "api://workiq.svc.cloud.microsoft/.default";
+string? token = parsed.Token, appId = parsed.AppId, account = parsed.Account, tenant = parsed.Tenant;
+bool stream = parsed.Stream, allHeaders = parsed.AllHeaders;
 
 if (string.IsNullOrEmpty(token))
 {
@@ -232,7 +221,7 @@ async Task SyncResponse(HttpClient client, string ep, HttpContent body, Cancella
                  msg.TryGetProperty("contextId", out var sCtx))
             contextId = sCtx.GetString();
 
-        var text = ExtractText(result);
+        var text = Helpers.ExtractText(result);
         Console.WriteLine(text);
     }
     else
@@ -301,7 +290,7 @@ async Task StreamResponse(HttpClient client, string ep, HttpContent body, Cancel
                 contextId = sCtx.GetString();
 
             // Extract and print text delta
-            var fullText = ExtractText(payload);
+            var fullText = Helpers.ExtractText(payload);
             if (fullText.StartsWith(previousText, StringComparison.Ordinal))
             {
                 Console.Write(fullText[previousText.Length..]);
@@ -317,42 +306,6 @@ async Task StreamResponse(HttpClient client, string ep, HttpContent body, Cancel
     }
 
     Console.WriteLine();
-}
-
-// ── Extract text from A2A response ───────────────────────────────────────
-
-string ExtractText(JsonElement el)
-{
-    // Try direct parts
-    if (TryGetParts(el, out var text)) return text;
-
-    // Try result.status.message.parts (task response)
-    if (el.TryGetProperty("status", out var status) &&
-        status.TryGetProperty("message", out var msg) &&
-        TryGetParts(msg, out text)) return text;
-
-    // Try result.message.parts
-    if (el.TryGetProperty("message", out var m) &&
-        TryGetParts(m, out text)) return text;
-
-    return "";
-}
-
-bool TryGetParts(JsonElement el, out string text)
-{
-    text = "";
-    if (!el.TryGetProperty("parts", out var parts) || parts.ValueKind != JsonValueKind.Array)
-        return false;
-
-    var sb = new StringBuilder();
-    foreach (var part in parts.EnumerateArray())
-    {
-        if (part.TryGetProperty("text", out var t))
-            sb.Append(t.GetString());
-    }
-
-    text = sb.ToString();
-    return text.Length > 0;
 }
 
 // ── WAM auth ─────────────────────────────────────────────────────────────
@@ -453,10 +406,10 @@ void PrintUsage()
       --token, -t      Bearer JWT token, or 'WAM' for Windows broker auth
 
     Options:
-      --endpoint, -e   Agent URL. Defaults to the WorkIQ Gateway A2A endpoint:
+      --endpoint, -e   Agent URL. Defaults to the Work IQ Gateway A2A endpoint:
                        https://workiq.svc.cloud.microsoft/a2a/
                        Override to target other rings (e.g., ppe./test.) or Graph RP.
-      --scope, -s      Token scope for WAM. Defaults to the WorkIQ audience:
+      --scope, -s      Token scope for WAM. Defaults to the Work IQ audience:
                        api://workiq.svc.cloud.microsoft/.default
                        For Graph RP use: https://graph.microsoft.com/.default
       --appid, -a      App client ID (required with WAM)
@@ -467,10 +420,10 @@ void PrintUsage()
       --all-headers    Print all response headers (default: key diagnostics only)
 
     Examples:
-      # WorkIQ Gateway (uses defaults)
+      # Work IQ Gateway (uses defaults)
       dotnet run -- -t WAM -a <appid>
 
-      # WorkIQ PPE ring (PFT path)
+      # Work IQ PPE ring (PFT path)
       dotnet run -- -e https://ppe.workiq.svc.cloud.dev.microsoft/a2a/ -t WAM -a <appid>
 
       # Graph RP (override both)

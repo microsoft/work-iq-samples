@@ -32,16 +32,21 @@ struct MessageBubbleView: View {
     }
 
     private var markdownAttributedString: AttributedString {
-        // Complete messages use full markdown parsing (handles paragraphs, lists, etc.)
-        // Streaming chunks use inline-only (handles partial bold/italic/links)
-        if message.isComplete {
-            if let result = try? AttributedString(markdown: message.text, options: .init(interpretedSyntax: .full)) {
-                return result
-            }
-        }
-        if let result = try? AttributedString(markdown: message.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+        renderMarkdown(text: message.text, isComplete: message.isComplete)
+    }
+}
+
+/// Render text as an AttributedString with markdown formatting.
+/// Complete messages use full markdown parsing (handles paragraphs, lists, etc.)
+/// Streaming chunks use inline-only (handles partial bold/italic/links)
+func renderMarkdown(text: String, isComplete: Bool) -> AttributedString {
+    if isComplete {
+        if let result = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .full)) {
             return result
         }
-        return AttributedString(message.text)
     }
+    if let result = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+        return result
+    }
+    return AttributedString(text)
 }

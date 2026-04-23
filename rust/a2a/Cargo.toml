@@ -19,5 +19,14 @@ base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 futures-util = "0.3"
 anyhow = "1"
-dirs = "5"
 iana-time-zone = "0.1"
+msal = { git = "https://github.com/tolgaki/msal-rust" }
+open = "5"
+
+[target.'cfg(target_os = "macos")'.dependencies.msal]
+git = "https://github.com/tolgaki/msal-rust"
+features = ["broker-macos"]
+
+[target.'cfg(target_os = "windows")'.dependencies.msal]
+git = "https://github.com/tolgaki/msal-rust"
+features = ["broker-wam"]

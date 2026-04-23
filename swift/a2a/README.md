@@ -1,6 +1,6 @@
 # A2A Chat
 
-A SwiftUI iOS/iPadOS app for chatting with [Microsoft Work IQ](https://aka.ms/workiq) using the [A2A (Agent-to-Agent) protocol v0.3](https://a2a-protocol.org). The AI assistant can access and reason about your Microsoft 365 data — emails, Teams chats, OneDrive documents, and more.
+A SwiftUI iOS/iPadOS app for chatting with an A2A-compatible endpoint using the [A2A (Agent-to-Agent) protocol v0.3](https://a2a-protocol.org).
 
 ## Features
 
@@ -15,7 +15,7 @@ A SwiftUI iOS/iPadOS app for chatting with [Microsoft Work IQ](https://aka.ms/wo
 
 - **Xcode 26+** (Swift 6.0)
 - iOS/iPadOS 26+ device or simulator
-- A Microsoft 365 Copilot license on your test user
+- A Microsoft 365 account
 - An Azure AD app registration (see [Setup](#azure-ad-app-registration) below)
 
 > **Admin setup note**: For multi-language testing (e.g., this sample + the .NET samples sharing one app registration), see the unified [`../../ADMIN_SETUP.md`](../../ADMIN_SETUP.md) and `scripts/admin-setup.{sh,ps1}` at the repo root. The setup script in this folder (`setup-app-registration.{sh,ps1}`) is iOS-specific — it adds the iOS redirect URI (`msauth.app.blueglass.A2A-Chat://auth`) needed by MSAL on iOS, and generates `Configuration.plist`. Run it after the unified script (or instead of, if you only need the iOS app).
@@ -27,7 +27,9 @@ The included scripts automate app registration. Pick whichever matches your envi
 ### macOS / Linux
 
 ```bash
-# Requires Azure CLI — install via: brew install azure-cli
+# Requires Azure CLI
+# macOS:  brew install azure-cli
+# Linux:  https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-linux
 az login
 ./setup-app-registration.sh
 ```
@@ -36,6 +38,7 @@ az login
 
 ```powershell
 # Requires Azure CLI
+# Install: winget install Microsoft.AzureCLI
 az login
 .\setup-app-registration.ps1
 ```
@@ -73,7 +76,7 @@ A2A Chat/
 │   └── ChatMessage.swift          # Chat message data model
 ├── Services/
 │   ├── AuthService.swift          # MSAL auth (sign-in, token refresh, sign-out)
-│   └── A2AService.swift           # Work IQ A2A client (streaming & sync)
+│   └── A2AService.swift           # A2A client (streaming & sync)
 └── Views/
     ├── ContentView.swift          # Root view — routes between Welcome and Chat
     ├── WelcomeView.swift          # Sign-in screen
@@ -86,7 +89,7 @@ A2A Chat/
 | Package | Source | Purpose |
 |---------|--------|---------|
 | [MSAL](https://github.com/AzureAD/microsoft-authentication-library-for-objc) | AzureAD | Microsoft 365 authentication |
-| [A2AClient](https://github.com/tolgaki/a2a-client-swift) (1.0.12+) | tolgaki | A2A v0.3 protocol client for Work IQ |
+| [A2AClient](https://github.com/tolgaki/a2a-client-swift) (1.0.13+) | tolgaki | A2A v0.3 protocol client |
 
 ## License
 

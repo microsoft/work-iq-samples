@@ -164,15 +164,8 @@ while (true)
 
 // ── Core helpers ─────────────────────────────────────────────────────────
 
-static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(object response) => response switch
-{
-    AgentMessage am => (Join(am), am.ContextId, am.Metadata),
-    AgentTask { Status: { State: TaskState.Completed, Message: AgentMessage cm } } t => (Join(cm), t.ContextId, cm.Metadata),
-    AgentTask t => ($"[Task {t.Id} — {t.Status.State}]", t.ContextId, null),
-    _ => ("(no response)", null, null),
-};
-
-static string Join(AgentMessage m) => string.Join("\n", m.Parts.OfType<TextPart>().Select(p => p.Text));
+static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(object response)
+    => WorkIQ.A2A.Helpers.Extract(response);
 
 static HttpClient CreateHttpClient(string bearerToken, GatewayConfig gw)
 {
@@ -266,28 +259,18 @@ static void DecodeToken(string token)
 
 static Config? ParseArgs(string[] args)
 {
-    string? token = null, appId = null, endpoint = null, account = null, tenant = null;
-    bool graph = false, workiq = false, showToken = false, stream = false;
-    int verbosity = 1;
-    var headers = new List<string>();
+    var a = WorkIQ.A2A.Helpers.ParseArgs(args);
 
-    for (int i = 0; i < args.Length; i++)
+    if (a.Error != null)
     {
-        switch (args[i])
-        {
-            case "--graph": graph = true; break;
-            case "--workiq": workiq = true; break;
-            case "--token" or "-t": token = args[++i]; break;
-            case "--appid" or "-a": appId = args[++i]; break;
-            case "--endpoint" or "-e": endpoint = args[++i]; break;
-            case "--account": account = args[++i]; break;
-            case "--tenant" or "-T": tenant = args[++i]; break;
-            case "--show-token": showToken = true; break;
-            case "--stream": stream = true; break;
-            case "--verbosity" or "-v": verbosity = int.Parse(args[++i]); break;
-            case "--header" or "-H": headers.Add(args[++i]); break;
-        }
+        Ink($"ERROR: {a.Error}\n", ConsoleColor.Red);
+        return null;
     }
+
+    string? token = a.Token, appId = a.AppId, endpoint = a.Endpoint, account = a.Account, tenant = a.Tenant;
+    bool graph = a.Graph, workiq = a.Workiq, showToken = a.ShowToken, stream = a.Stream;
+    int verbosity = a.Verbosity;
+    var headers = a.Headers;
 
     if (string.IsNullOrEmpty(token) || (!graph && !workiq))
     {
@@ -298,7 +281,7 @@ static Config? ParseArgs(string[] args)
 
             Gateway (exactly one required):
               --graph          Use Microsoft Graph RP gateway
-              --workiq         Use WorkIQ Gateway
+              --workiq         Use Work IQ Gateway
 
             Auth:
               --token, -t      Bearer token or 'WAM' for Windows broker auth
@@ -310,7 +293,7 @@ static Config? ParseArgs(string[] args)
             Options:
               --endpoint, -e   Override the gateway host (scheme + authority only, no path).
                                The gateway-specific path (/rp/workiq/ for Graph, /a2a/ for
-                               WorkIQ) is preserved automatically.
+                               Work IQ) is preserved automatically.
               --header, -H     Custom HTTP header in 'Key: Value' format (repeatable)
               --show-token     Print the raw JWT token (for reuse with --token)
               --stream         Use streaming mode (SSE via message/stream)
@@ -427,7 +410,7 @@ class Gateways
         ExtraHeaders: []);
 
     public static readonly GatewayConfig WorkIQ = new(
-        Name: "WorkIQ Gateway",
+        Name: "Work IQ Gateway",
         Endpoint: "https://workiq.svc.cloud.microsoft/a2a/",
         Scopes: ["api://workiq.svc.cloud.microsoft/.default"],
         Authority: "https://login.microsoftonline.com/common",
@@ -456,6 +439,9 @@ class WireLog : DelegatingHandler
                 foreach (var h in body.Headers) Console.WriteLine($"    {h.Key}: {string.Join(", ", h.Value)}");
                 var text = await body.ReadAsStringAsync(ct);
                 Console.WriteLine($"    Body: {Trunc(text, 500)}");
+                // Re-create content so the stream can be read again by SendAsync
+                var newContent = new StringContent(text, System.Text.Encoding.UTF8, body.Headers.ContentType?.MediaType ?? "application/json");
+                req.Content = newContent;
             }
 
             Console.ResetColor();
