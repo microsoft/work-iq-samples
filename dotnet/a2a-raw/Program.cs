@@ -101,24 +101,30 @@ while (true)
     Console.Write("Agent > ");
     Console.ResetColor();
 
-    // Show a simple progress indicator while waiting
-    Console.CursorVisible = false;
+    // Show a simple progress indicator while waiting. Skipped when stdout
+    // is redirected (e.g., piped to `tee` or a log file): Console.CursorVisible
+    // and Console.SetCursorPosition both throw IOException on a non-TTY.
     var spinnerCts = new CancellationTokenSource();
-    var spinnerTask = Task.Run(async () =>
+    Task spinnerTask = Task.CompletedTask;
+    if (!Console.IsOutputRedirected)
     {
-        var frames = new[] { ".  ", ".. ", "..." , " ..", "  .", "   " };
-        var i = 0;
-        while (!spinnerCts.Token.IsCancellationRequested)
+        Console.CursorVisible = false;
+        spinnerTask = Task.Run(async () =>
         {
-            var f = frames[i++ % frames.Length];
-            Console.Write(f);
-            Console.SetCursorPosition(Console.CursorLeft - f.Length, Console.CursorTop);
-            try { await Task.Delay(150, spinnerCts.Token); } catch { break; }
-        }
-        Console.Write("   ");
-        Console.SetCursorPosition(Console.CursorLeft - 3, Console.CursorTop);
-        Console.CursorVisible = true;
-    });
+            var frames = new[] { ".  ", ".. ", "..." , " ..", "  .", "   " };
+            var i = 0;
+            while (!spinnerCts.Token.IsCancellationRequested)
+            {
+                var f = frames[i++ % frames.Length];
+                Console.Write(f);
+                Console.SetCursorPosition(Console.CursorLeft - f.Length, Console.CursorTop);
+                try { await Task.Delay(150, spinnerCts.Token); } catch { break; }
+            }
+            Console.Write("   ");
+            Console.SetCursorPosition(Console.CursorLeft - 3, Console.CursorTop);
+            Console.CursorVisible = true;
+        });
+    }
 
     try
     {

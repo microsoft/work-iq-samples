@@ -493,6 +493,9 @@ class Spinner
 
     public void Start()
     {
+        // Skip when stdout is redirected (e.g., piped to `tee` or a log file):
+        // Console.CursorVisible / SetCursorPosition throw IOException on a non-TTY.
+        if (Console.IsOutputRedirected) return;
         cts = new CancellationTokenSource();
         var token = cts.Token;
         task = Task.Run(async () =>
