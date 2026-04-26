@@ -8,6 +8,7 @@ namespace WorkIQ.A2ARaw;
 
 public record RawArgs(
     string? Endpoint, string? Token, string? AppId, string? Account,
+    string? Scope, string? Tenant,
     bool Stream, bool AllHeaders, string? Error);
 
 public static class Helpers
@@ -16,7 +17,7 @@ public static class Helpers
 
     public static RawArgs ParseArgs(string[] args)
     {
-        string? endpoint = null, token = null, appId = null, account = null;
+        string? endpoint = null, token = null, appId = null, account = null, scope = null, tenant = null;
         bool stream = false, allHeaders = false;
 
         for (int i = 0; i < args.Length; i++)
@@ -35,6 +36,12 @@ public static class Helpers
                 case "--account":
                     if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
                     account = args[++i]; break;
+                case "--scope" or "-s":
+                    if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
+                    scope = args[++i]; break;
+                case "--tenant" or "-T":
+                    if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
+                    tenant = args[++i]; break;
                 case "--stream": stream = true; break;
                 case "--all-headers": allHeaders = true; break;
                 default:
@@ -42,9 +49,9 @@ public static class Helpers
             }
         }
 
-        return new RawArgs(endpoint, token, appId, account, stream, allHeaders, null);
+        return new RawArgs(endpoint, token, appId, account, scope, tenant, stream, allHeaders, null);
 
-        static RawArgs Err(string msg) => new(null, null, null, null, false, false, msg);
+        static RawArgs Err(string msg) => new(null, null, null, null, null, null, false, false, msg);
     }
 
     // ── A2A response text extraction ────────────────────────────────────

@@ -12,8 +12,10 @@ A Rust command-line tool for interactive [A2A v0.3 (Agent-to-Agent)](https://a2a
 ## Prerequisites
 
 - [Rust](https://www.rust-lang.org/tools/install) (1.70+)
-- A Microsoft 365 account with access to Work IQ
+- A Microsoft 365 Copilot license on your test user
 - An Azure AD app registration with the `https://graph.microsoft.com/.default` scope and device code flow enabled. A default app ID is provided for convenience, or you can register your own (see [Setup](#azure-ad-app-registration) below).
+
+> **Admin setup note**: For multi-language testing (e.g., this sample + the .NET samples sharing one app registration), see the unified [`../../ADMIN_SETUP.md`](../../ADMIN_SETUP.md) and `scripts/admin-setup.{sh,ps1}` at the repo root. The setup script in this folder (`setup-app-registration.{sh,ps1}`) is Rust-specific (device code, no WAM broker redirect URI).
 
 ## Quick Start
 

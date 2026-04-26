@@ -4,12 +4,12 @@
 // WorkIQ A2A Raw Sample — Minimal A2A client using only HttpClient + JSON
 // No A2A SDK. Shows exactly what goes over the wire (JSON-RPC v0.3 format).
 //
-// Usage:
-//   dotnet run -- --endpoint <agent-url> --token WAM --appid <client-id> [--account user@tenant.com] [--stream]
-//   dotnet run -- --endpoint <agent-url> --token <JWT> [--stream]
+// Defaults target the Work IQ Gateway (`https://workiq.svc.cloud.microsoft/a2a/`).
+// Override --endpoint + --scope to target Graph RP or any other A2A endpoint.
 //
-// Example (M365 Copilot via Graph RP):
-//   dotnet run -- --endpoint https://graph.microsoft.com/rp/workiq/ --token WAM --appid <id>
+// Usage:
+//   dotnet run -- --token <JWT|WAM> --appid <client-id> [--account user@tenant.com] [--stream]
+//   dotnet run -- --endpoint <agent-url> --token <JWT> [--stream]
 
 using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
@@ -29,10 +29,14 @@ if (parsed.Error != null)
     return;
 }
 
-string? endpoint = parsed.Endpoint, token = parsed.Token, appId = parsed.AppId, account = parsed.Account;
+// Defaults target the Work IQ Gateway (A2A endpoint + matching scope).
+// To target Graph RP instead, override both --endpoint and --scope.
+string endpoint = parsed.Endpoint ?? "https://workiq.svc.cloud.microsoft/a2a/";
+string scope = parsed.Scope ?? "api://workiq.svc.cloud.microsoft/.default";
+string? token = parsed.Token, appId = parsed.AppId, account = parsed.Account, tenant = parsed.Tenant;
 bool stream = parsed.Stream, allHeaders = parsed.AllHeaders;
 
-if (string.IsNullOrEmpty(endpoint) || string.IsNullOrEmpty(token))
+if (string.IsNullOrEmpty(token))
 {
     PrintUsage();
     return;
@@ -51,7 +55,7 @@ if (token.Equals("WAM", StringComparison.OrdinalIgnoreCase))
         return;
     }
 
-    var (tok, app, acct) = await AcquireToken(appId, account);
+    var (tok, app, acct) = await AcquireToken(appId, account, scope, tenant);
     token = tok;
     msalApp = app;
     msalAccount = acct;
@@ -86,7 +90,7 @@ while (true)
         try
         {
             var result = await msalApp.AcquireTokenSilent(
-                new[] { "https://graph.microsoft.com/.default" }, msalAccount).ExecuteAsync();
+                new[] { scope }, msalAccount).ExecuteAsync();
             token = result.AccessToken;
             http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         }
@@ -97,24 +101,30 @@ while (true)
     Console.Write("Agent > ");
     Console.ResetColor();
 
-    // Show a simple progress indicator while waiting
-    Console.CursorVisible = false;
+    // Show a simple progress indicator while waiting. Skipped when stdout
+    // is redirected (e.g., piped to `tee` or a log file): Console.CursorVisible
+    // and Console.SetCursorPosition both throw IOException on a non-TTY.
     var spinnerCts = new CancellationTokenSource();
-    var spinnerTask = Task.Run(async () =>
+    Task spinnerTask = Task.CompletedTask;
+    if (!Console.IsOutputRedirected)
     {
-        var frames = new[] { ".  ", ".. ", "..." , " ..", "  .", "   " };
-        var i = 0;
-        while (!spinnerCts.Token.IsCancellationRequested)
+        Console.CursorVisible = false;
+        spinnerTask = Task.Run(async () =>
         {
-            var f = frames[i++ % frames.Length];
-            Console.Write(f);
-            Console.SetCursorPosition(Console.CursorLeft - f.Length, Console.CursorTop);
-            try { await Task.Delay(150, spinnerCts.Token); } catch { break; }
-        }
-        Console.Write("   ");
-        Console.SetCursorPosition(Console.CursorLeft - 3, Console.CursorTop);
-        Console.CursorVisible = true;
-    });
+            var frames = new[] { ".  ", ".. ", "..." , " ..", "  .", "   " };
+            var i = 0;
+            while (!spinnerCts.Token.IsCancellationRequested)
+            {
+                var f = frames[i++ % frames.Length];
+                Console.Write(f);
+                Console.SetCursorPosition(Console.CursorLeft - f.Length, Console.CursorTop);
+                try { await Task.Delay(150, spinnerCts.Token); } catch { break; }
+            }
+            Console.Write("   ");
+            Console.SetCursorPosition(Console.CursorLeft - 3, Console.CursorTop);
+            Console.CursorVisible = true;
+        });
+    }
 
     try
     {
@@ -307,11 +317,14 @@ async Task StreamResponse(HttpClient client, string ep, HttpContent body, Cancel
 // ── WAM auth ─────────────────────────────────────────────────────────────
 
 async Task<(string token, IPublicClientApplication app, IAccount? account)> AcquireToken(
-    string clientId, string? accountHint)
+    string clientId, string? accountHint, string scope, string? tenantId)
 {
+    var authority = string.IsNullOrEmpty(tenantId)
+        ? "https://login.microsoftonline.com/common"
+        : $"https://login.microsoftonline.com/{tenantId}";
     var builder = PublicClientApplicationBuilder.Create(clientId)
         .WithDefaultRedirectUri()
-        .WithAuthority("https://login.microsoftonline.com/common");
+        .WithAuthority(authority);
 
     if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
     {
@@ -319,7 +332,7 @@ async Task<(string token, IPublicClientApplication app, IAccount? account)> Acqu
     }
 
     var app = builder.Build();
-    var scopes = new[] { "https://graph.microsoft.com/.default" };
+    var scopes = new[] { scope };
 
     AuthenticationResult result;
     try
@@ -393,20 +406,36 @@ void PrintUsage()
     Work IQ A2A Raw Sample — minimal A2A client, no SDK (JSON-RPC v0.3 wire format)
 
     Usage:
-      dotnet run -- --endpoint <url> --token <JWT|WAM> [options]
+      dotnet run -- --token <JWT|WAM> [options]
 
     Required:
-      --endpoint, -e   Agent URL (e.g., https://graph.microsoft.com/rp/workiq/)
       --token, -t      Bearer JWT token, or 'WAM' for Windows broker auth
 
     Options:
+      --endpoint, -e   Agent URL. Defaults to the Work IQ Gateway A2A endpoint:
+                       https://workiq.svc.cloud.microsoft/a2a/
+                       Override to target other rings (e.g., ppe./test.) or Graph RP.
+      --scope, -s      Token scope for WAM. Defaults to the Work IQ audience:
+                       api://workiq.svc.cloud.microsoft/.default
+                       For Graph RP use: https://graph.microsoft.com/.default
       --appid, -a      App client ID (required with WAM)
       --account        Account hint (e.g., user@contoso.com)
+      --tenant, -T     Tenant ID or domain (required with WAM for single-tenant apps;
+                       defaults to 'common' for multi-tenant apps)
       --stream         Use streaming mode (SSE via message/stream)
       --all-headers    Print all response headers (default: key diagnostics only)
 
     Examples:
-      dotnet run -- -e https://graph.microsoft.com/rp/workiq/ -t WAM -a <appid>
+      # Work IQ Gateway (uses defaults)
+      dotnet run -- -t WAM -a <appid>
+
+      # Work IQ PPE ring (PFT path)
+      dotnet run -- -e https://ppe.workiq.svc.cloud.dev.microsoft/a2a/ -t WAM -a <appid>
+
+      # Graph RP (override both)
+      dotnet run -- -e https://graph.microsoft.com/rp/workiq/ -s https://graph.microsoft.com/.default -t WAM -a <appid>
+
+      # With a pre-obtained JWT
       dotnet run -- -e https://graph.microsoft.com/rp/workiq/ -t eyJ0eXAi... --stream
     """);
 }

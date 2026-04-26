@@ -21,7 +21,7 @@ IAccount? msalAccount = null;
 
 if (config.Token.Equals("WAM", StringComparison.OrdinalIgnoreCase))
 {
-    var r = await AcquireWamToken(config.AppId, config.Gateway.Scopes, config.Account);
+    var r = await AcquireWamToken(config.AppId, config.Gateway.Scopes, config.Account, config.Tenant);
     token = r.token; msalApp = r.app; msalAccount = r.account;
 }
 else
@@ -58,7 +58,7 @@ while (true)
     {
         try
         {
-            var r = await AcquireWamToken(config.AppId, config.Gateway.Scopes, config.Account, msalApp, msalAccount);
+            var r = await AcquireWamToken(config.AppId, config.Gateway.Scopes, config.Account, config.Tenant, msalApp, msalAccount);
             token = r.token; msalAccount = r.account;
             httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         }
@@ -183,15 +183,18 @@ static HttpClient CreateHttpClient(string bearerToken, GatewayConfig gw)
 // ── WAM auth ─────────────────────────────────────────────────────────────
 
 static async Task<(string token, IPublicClientApplication app, IAccount? account)> AcquireWamToken(
-    string clientId, string[] scopes, string? accountHint,
+    string clientId, string[] scopes, string? accountHint, string? tenantId,
     IPublicClientApplication? existingApp = null, IAccount? existingAccount = null)
 {
     var app = existingApp;
     if (app == null)
     {
+        var authority = string.IsNullOrEmpty(tenantId)
+            ? "https://login.microsoftonline.com/common"
+            : $"https://login.microsoftonline.com/{tenantId}";
         var builder = PublicClientApplicationBuilder.Create(clientId)
             .WithDefaultRedirectUri()
-            .WithAuthority("https://login.microsoftonline.com/common");
+            .WithAuthority(authority);
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
@@ -264,7 +267,7 @@ static Config? ParseArgs(string[] args)
         return null;
     }
 
-    string? token = a.Token, appId = a.AppId, endpoint = a.Endpoint, account = a.Account;
+    string? token = a.Token, appId = a.AppId, endpoint = a.Endpoint, account = a.Account, tenant = a.Tenant;
     bool graph = a.Graph, workiq = a.Workiq, showToken = a.ShowToken, stream = a.Stream;
     int verbosity = a.Verbosity;
     var headers = a.Headers;
@@ -278,15 +281,19 @@ static Config? ParseArgs(string[] args)
 
             Gateway (exactly one required):
               --graph          Use Microsoft Graph RP gateway
-              --workiq         Use WorkIQ Gateway (coming soon)
+              --workiq         Use Work IQ Gateway
 
             Auth:
               --token, -t      Bearer token or 'WAM' for Windows broker auth
               --appid, -a      App client ID (required with WAM)
               --account        Account hint (e.g. user@contoso.com)
+              --tenant, -T     Tenant ID or domain (required with WAM for single-tenant apps;
+                               defaults to 'common' for multi-tenant apps)
 
             Options:
-              --endpoint, -e   Override default gateway endpoint
+              --endpoint, -e   Override the gateway host (scheme + authority only, no path).
+                               The gateway-specific path (/rp/workiq/ for Graph, /a2a/ for
+                               Work IQ) is preserved automatically.
               --header, -H     Custom HTTP header in 'Key: Value' format (repeatable)
               --show-token     Print the raw JWT token (for reuse with --token)
               --stream         Use streaming mode (SSE via message/stream)
@@ -296,6 +303,8 @@ static Config? ParseArgs(string[] args)
               dotnet run -- --graph --token WAM --appid <your-app-id>
               dotnet run -- --graph --token WAM --appid <your-app-id> --account user@contoso.com
               dotnet run -- --graph --token eyJ0eXAi...
+              dotnet run -- --workiq --token WAM --appid <your-app-id>
+              dotnet run -- --workiq --endpoint https://test.workiq.svc.cloud.dev.microsoft --token WAM --appid <your-app-id>
             """);
         return null;
     }
@@ -303,12 +312,6 @@ static Config? ParseArgs(string[] args)
     if (graph && workiq)
     {
         Ink("ERROR: specify --graph or --workiq, not both\n", ConsoleColor.Red);
-        return null;
-    }
-
-    if (workiq)
-    {
-        Ink("ERROR: --workiq gateway is not yet implemented\n", ConsoleColor.Yellow);
         return null;
     }
 
@@ -321,7 +324,10 @@ static Config? ParseArgs(string[] args)
     var gw = graph ? Gateways.Graph : Gateways.WorkIQ;
     if (!string.IsNullOrEmpty(endpoint))
     {
-        gw = gw with { Endpoint = endpoint };
+        // --endpoint is host-only (scheme + authority). Preserve the gateway's path.
+        var hostUri = new Uri(endpoint.TrimEnd('/'));
+        var presetPath = new Uri(gw.Endpoint).AbsolutePath;
+        gw = gw with { Endpoint = $"{hostUri.Scheme}://{hostUri.Authority}{presetPath}" };
     }
 
     if (headers.Count > 0)
@@ -329,7 +335,7 @@ static Config? ParseArgs(string[] args)
         gw = gw with { ExtraHeaders = [.. gw.ExtraHeaders, .. headers] };
     }
 
-    return new Config(token, appId ?? "", gw, account, showToken, verbosity, stream);
+    return new Config(token, appId ?? "", gw, account, tenant, showToken, verbosity, stream);
 }
 
 // ── Citations ─────────────────────────────────────────────────────────────
@@ -388,7 +394,7 @@ static void Ink(string s, ConsoleColor c) { Console.ForegroundColor = c; Console
 [DllImport("user32.dll", ExactSpelling = true)] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
 static IntPtr ConsoleWindowHandle() { var c = Win32GetConsoleWindow(); var r = GetAncestor(c, 3); return r != IntPtr.Zero ? r : c; }
 
-record Config(string Token, string AppId, GatewayConfig Gateway, string? Account, bool ShowToken, int Verbosity, bool Stream);
+record Config(string Token, string AppId, GatewayConfig Gateway, string? Account, string? Tenant, bool ShowToken, int Verbosity, bool Stream);
 
 // ── Gateway definitions ──────────────────────────────────────────────────
 
@@ -404,9 +410,9 @@ class Gateways
         ExtraHeaders: []);
 
     public static readonly GatewayConfig WorkIQ = new(
-        Name: "WorkIQ Gateway",
-        Endpoint: "", // TODO: set when available
-        Scopes: [], // TODO: set when available
+        Name: "Work IQ Gateway",
+        Endpoint: "https://workiq.svc.cloud.microsoft/a2a/",
+        Scopes: ["api://workiq.svc.cloud.microsoft/.default"],
         Authority: "https://login.microsoftonline.com/common",
         ExtraHeaders: []);
 }
@@ -487,6 +493,9 @@ class Spinner
 
     public void Start()
     {
+        // Skip when stdout is redirected (e.g., piped to `tee` or a log file):
+        // Console.CursorVisible / SetCursorPosition throw IOException on a non-TTY.
+        if (Console.IsOutputRedirected) return;
         cts = new CancellationTokenSource();
         var token = cts.Token;
         task = Task.Run(async () =>

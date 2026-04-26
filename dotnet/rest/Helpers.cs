@@ -6,7 +6,7 @@ using System.Text.Json;
 namespace WorkIQ.Rest;
 
 public record RestArgs(
-    string? Token, string? AppId, string? Account,
+    string? Token, string? AppId, string? Account, string? Endpoint, string? Tenant,
     bool Graph, bool Workiq, bool Stream, bool ShowToken,
     int Verbosity, List<string> Headers, string? Error);
 
@@ -16,7 +16,7 @@ public static class Helpers
 
     public static RestArgs ParseArgs(string[] args)
     {
-        string? token = null, appId = null, account = null;
+        string? token = null, appId = null, account = null, endpoint = null, tenant = null;
         bool graph = false, workiq = false, stream = false, showToken = false;
         int verbosity = 1;
         var headers = new List<string>();
@@ -36,6 +36,12 @@ public static class Helpers
                 case "--account":
                     if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
                     account = args[++i]; break;
+                case "--endpoint" or "-e":
+                    if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
+                    endpoint = args[++i]; break;
+                case "--tenant" or "-T":
+                    if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
+                    tenant = args[++i]; break;
                 case "--stream": stream = true; break;
                 case "--show-token": showToken = true; break;
                 case "--verbosity" or "-v":
@@ -49,9 +55,9 @@ public static class Helpers
             }
         }
 
-        return new RestArgs(token, appId, account, graph, workiq, stream, showToken, verbosity, headers, null);
+        return new RestArgs(token, appId, account, endpoint, tenant, graph, workiq, stream, showToken, verbosity, headers, null);
 
-        static RestArgs Err(string msg) => new(null, null, null, false, false, false, false, 1, new List<string>(), msg);
+        static RestArgs Err(string msg) => new(null, null, null, null, null, false, false, false, false, 1, new List<string>(), msg);
     }
 
     // ── Chat body builder ───────────────────────────────────────────────

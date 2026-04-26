@@ -1,88 +1,147 @@
 # Work IQ REST Sample
 
-A minimal, single-file interactive client for the [Microsoft 365 Copilot Chat API](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview) — the REST interface for conversational AI grounded in Microsoft 365 data.
+A minimal, single-file interactive client for the [Microsoft 365 Copilot Chat REST API](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview) — the REST interface for conversational AI grounded in Microsoft 365 data.
 
-Supports both **synchronous** and **streaming** (SSE) modes.
-
-> **Prerequisites, authentication, and common issues** are covered in the [root README](../../README.md). Read that first.
+Supports both **synchronous** and **streaming** (SSE) modes, against either the **Work IQ Gateway** or **Microsoft Graph**.
 
 ## API reference
 
-| Operation | Method | Endpoint | Docs |
-|-----------|--------|----------|------|
-| Create conversation | `POST` | `/beta/copilot/conversations` | [Docs](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/copilotroot-post-conversations) |
-| Chat (sync) | `POST` | `/beta/copilot/conversations/{id}/chat` | [Docs](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/copilotconversation-chat) |
-| Chat (stream) | `POST` | `/beta/copilot/conversations/{id}/chatOverStream` | [Docs](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/copilotconversation-chatoverstream) |
+| Operation | Method | Path (via Work IQ) | Path (via Graph) | Docs |
+|-----------|--------|--------------------|------------------|------|
+| Create conversation | `POST` | `/rest/beta/conversations` | `/beta/copilot/conversations` | [Docs](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/copilotroot-post-conversations) |
+| Chat (sync) | `POST` | `/rest/beta/conversations/{id}/chat` | `/beta/copilot/conversations/{id}/chat` | [Docs](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/copilotconversation-chat) |
+| Chat (stream) | `POST` | `/rest/beta/conversations/{id}/chatOverStream` | `/beta/copilot/conversations/{id}/chatOverStream` | [Docs](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/copilotconversation-chatoverstream) |
+
+The sample appends the gateway-specific path to `--endpoint` automatically. You only need to supply the host.
+
+## Prerequisites
+
+1. **Microsoft 365 Copilot license** on your test user.
+2. **An Entra app registration** configured with the right permissions and redirect URIs. One-time task.
+   - If you're the tenant admin:
+     ```bash
+     # Bash
+     ../../scripts/admin-setup.sh --workiq    # or --graph or --both
+     # PowerShell
+     ..\..\scripts\admin-setup.ps1 -Gateway WorkIQ
+     ```
+   - Otherwise, hand [`../../ADMIN_SETUP.md`](../../ADMIN_SETUP.md) to your admin. They'll give you an **App ID** and **Tenant ID**.
+3. **.NET 10 SDK** or later — [download](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ## Quick start
 
+### Against the Work IQ Gateway (default host `workiq.svc.cloud.microsoft`)
+
 ```bash
-# Build
-dotnet build
-
-# With a pre-obtained JWT token (any platform)
-dotnet run -- --graph --token eyJ0eXAiOiJKV1Qi...
-
-# With WAM broker auth (Windows only)
-dotnet run -- --graph --token WAM --appid <your-app-client-id>
-
-# Streaming mode (SSE)
-dotnet run -- --graph --token WAM --appid <your-app-client-id> --stream
-
-# With account hint
-dotnet run -- --graph --token WAM --appid <your-app-client-id> --account user@contoso.com
+dotnet run -- --workiq --token WAM --appid <APP_ID> --tenant <TENANT_ID>
 ```
 
-> **macOS / Linux users:** WAM is only available on Windows. Use `--token <JWT>` with a pre-obtained token instead. See the [root README](../../README.md#authentication) for how to acquire a token.
+Type a message, see a response, type `quit` to exit.
 
-## Parameters
+### Against the Work IQ Gateway, a specific ring (e.g. `ppe.`)
+
+```bash
+dotnet run -- --workiq --endpoint https://ppe.workiq.svc.cloud.dev.microsoft \
+  --token WAM --appid <APP_ID> --tenant <TENANT_ID>
+```
+
+`--endpoint` takes **host-only** (scheme + authority). The sample appends `/rest/beta` automatically.
+
+### Against Microsoft Graph
+
+```bash
+dotnet run -- --graph --token WAM --appid <APP_ID> --tenant <TENANT_ID>
+```
+
+### Streaming mode
+
+Add `--stream` to any of the above to switch from `/chat` (sync) to `/chatOverStream` (SSE).
+
+### With a pre-obtained JWT (any platform)
+
+```bash
+dotnet run -- --graph --token eyJ0eXAi...
+```
+
+> **macOS / Linux users:** WAM is only available on Windows. Use `--token <JWT>` with a pre-obtained token instead.
+
+## Expected output
+
+```
+── TOKEN ──
+  aud              fdcc1f02-fc51-4226-8753-f668596af7f7
+  appid            <APP_ID>
+  tid              <TENANT_ID>
+  name             <Your Name>
+  scp              WorkIQAgent.Ask
+  expires          ...
+
+── READY — Synchronous mode (workiq) ──
+Type a message. 'quit' to exit.
+
+You > What's on my calendar today?
+  Creating conversation...
+  Conversation: a1b2c3d4-...
+Agent > Here's your schedule:
+  - 9:00 AM — ...
+  Citations: 3  Annotations: 2
+  (1234 ms)
+
+You > quit
+```
+
+If the `── TOKEN ──` block shows an `aud` matching the gateway and `scp` matching the required scope(s), your auth is working.
+
+## Flags
 
 | Flag | Description |
 |------|-------------|
-| `--graph` | Use Microsoft Graph API (required) |
-| `--token`, `-t` | Bearer JWT token, or `WAM` for Windows broker auth |
-| `--appid`, `-a` | Azure AD app client ID (required with `--token WAM`) |
-| `--account` | Account hint for WAM (e.g. `user@contoso.com`) |
-| `--stream` | Use streaming mode (`/chatOverStream` with SSE) |
+| `--graph` / `--workiq` | Gateway selection. Exactly one required. |
+| `--token, -t` | `WAM` for Windows broker auth, or a pre-obtained JWT string |
+| `--appid, -a` | Entra app client ID (required with `WAM`) |
+| `--tenant, -T` | Tenant ID or domain. Required with `WAM` for single-tenant apps; defaults to `common` for multi-tenant. |
+| `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
+| `--endpoint, -e` | Override the gateway host (scheme + authority only, no path) |
+| `--stream` | Use streaming mode (`/chatOverStream` via SSE) |
+| `--header, -H` | Custom request header, e.g., `-H "x-foo: bar"` (repeatable) |
 | `--show-token` | Print the raw JWT after decoding |
-| `-v`, `--verbosity` | `0` = response only, `1` = default, `2` = full wire diagnostics |
-| `--header`, `-H` | Custom HTTP header in `Key: Value` format (repeatable) |
+| `-v, --verbosity` | `0` response only, `1` default, `2` full wire, `3` all response headers |
 
 ## How it works
 
-### Synchronous mode (default)
+### Synchronous mode
 
 ```
-Client                              Microsoft Graph
-  |                                       |
-  |-- POST /beta/copilot/conversations -->|  (creates conversation)
-  |<-- 201 { "id": "conv-123" } ---------|
-  |                                       |
-  |-- POST .../conv-123/chat ------------>|
-  |   { "message": { "text": "..." } }   |
-  |<-- 200 { "messages": [...] } ---------|  (complete response)
+Client                                     Gateway
+  |                                           |
+  |-- POST .../conversations ----------------->|  (creates conversation)
+  |<-- 201 { "id": "conv-123" } --------------|
+  |                                           |
+  |-- POST .../conv-123/chat ---------------->|
+  |   { "message": { "text": "..." } }        |
+  |<-- 200 { "messages": [...] } -------------|  (complete response)
 ```
 
 ### Streaming mode (`--stream`)
 
 ```
-Client                              Microsoft Graph
-  |                                       |
-  |-- POST /beta/copilot/conversations -->|
-  |<-- 201 { "id": "conv-123" } ---------|
-  |                                       |
-  |-- POST .../conv-123/chatOverStream -->|
-  |<-- 200 text/event-stream -------------|
-  |    data: { "messages": [...] }        |  (partial)
-  |    data: { "messages": [...] }        |  (more text)
-  |    data: { "messages": [...] }        |  (complete)
+Client                                     Gateway
+  |                                           |
+  |-- POST .../conversations ----------------->|
+  |<-- 201 { "id": "conv-123" } --------------|
+  |                                           |
+  |-- POST .../conv-123/chatOverStream ------->|
+  |<-- 200 text/event-stream -----------------|
+  |    data: { "messages": [...] }            |  (partial)
+  |    data: { "messages": [...] }            |  (more text)
+  |    data: { "messages": [...] }            |  (complete)
 ```
 
-Each SSE event contains the **full conversation state** (cumulative, not incremental). The sample computes deltas by comparing with the previous event's text to print only new content as it arrives.
+Each SSE event contains the **full conversation state** (cumulative, not incremental). The sample computes deltas by comparing against the previous event's text and prints only the new content as it arrives.
 
 ## Multi-turn conversations
 
-The sample reuses the conversation ID across turns. Each message continues the same conversation with full context:
+The sample reuses the conversation ID across turns — each message continues the same conversation with full context:
 
 ```
 You > What meetings do I have tomorrow?
@@ -126,9 +185,8 @@ data: { "id": "conv-123", "messages": [{ "text": "You have 3 meetings scheduled.
 
 ## REST-specific notes
 
-- **No external SDK required.** Unlike the A2A sample, this calls the Graph REST API directly with `HttpClient`. Just JSON over HTTP.
+- **No external SDK required.** Unlike the A2A sample, this calls the REST API directly with `HttpClient`. Just JSON over HTTP.
 - **Streaming is cumulative, not incremental.** Each SSE event contains the full conversation state. The sample computes deltas by diffing against the previous text.
-- **Conversation state is `active` during streaming.** The `state` field transitions to `active` while tokens are being generated.
 - **Graph Explorer doesn't support streaming.** Per [Microsoft docs](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview#known-limitations), use this sample or curl instead.
 
 ## NuGet dependencies
@@ -140,6 +198,16 @@ data: { "id": "conv-123", "messages": [{ "text": "You have 3 meetings scheduled.
 | `System.IdentityModel.Tokens.Jwt` | JWT decoding for diagnostics |
 
 No A2A SDK or Graph SDK needed — pure `HttpClient` + JSON.
+
+## Sample-specific troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `400 Invalid request, no valid route` against Work IQ | Pass `--endpoint` as host-only; the sample appends the correct path |
+| `403 Required scopes = [Sites.Read.All, ...]` against Graph | Admin needs to add the 7 Copilot Graph permissions. Run `scripts/admin-setup.sh --graph` |
+| `401 Unauthorized` | Token audience doesn't match the gateway. Verify the `aud` claim in the `── TOKEN ──` block matches the gateway you picked. |
+
+See the [root README](../../README.md#troubleshooting) for the full troubleshooting matrix (WAM setup, single-tenant apps, Copilot license, etc).
 
 ## Resources
 

@@ -7,7 +7,7 @@ using A2A;
 namespace WorkIQ.A2A;
 
 public record A2AArgs(
-    string? Token, string? AppId, string? Endpoint, string? Account,
+    string? Token, string? AppId, string? Endpoint, string? Account, string? Tenant,
     bool Graph, bool Workiq, bool ShowToken, bool Stream,
     int Verbosity, List<string> Headers, string? Error);
 
@@ -17,7 +17,7 @@ public static class Helpers
 
     public static A2AArgs ParseArgs(string[] args)
     {
-        string? token = null, appId = null, endpoint = null, account = null;
+        string? token = null, appId = null, endpoint = null, account = null, tenant = null;
         bool graph = false, workiq = false, showToken = false, stream = false;
         int verbosity = 1;
         var headers = new List<string>();
@@ -40,6 +40,9 @@ public static class Helpers
                 case "--account":
                     if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
                     account = args[++i]; break;
+                case "--tenant" or "-T":
+                    if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
+                    tenant = args[++i]; break;
                 case "--show-token": showToken = true; break;
                 case "--stream": stream = true; break;
                 case "--verbosity" or "-v":
@@ -53,9 +56,9 @@ public static class Helpers
             }
         }
 
-        return new A2AArgs(token, appId, endpoint, account, graph, workiq, showToken, stream, verbosity, headers, null);
+        return new A2AArgs(token, appId, endpoint, account, tenant, graph, workiq, showToken, stream, verbosity, headers, null);
 
-        static A2AArgs Err(string msg) => new(null, null, null, null, false, false, false, false, 1, new List<string>(), msg);
+        static A2AArgs Err(string msg) => new(null, null, null, null, null, false, false, false, false, 1, new List<string>(), msg);
     }
 
     // ── Response extraction (uses A2A SDK types) ────────────────────────
