@@ -38,12 +38,49 @@ if (config.Verbosity >= 1)
 
 WireLog.Verbosity = config.Verbosity;
 var httpClient = CreateHttpClient(token, config.Gateway);
-var a2a = new A2AClient(new Uri(config.Gateway.Endpoint), httpClient);
+
+// Resolve the A2A target URL.
+//   --agent-id not set: post directly to the gateway endpoint (default agent for that gateway).
+//   --agent-id set:     fetch the agent card from {gateway}/{agentId}/.well-known/agent-card.json
+//                       (handled by A2ACardResolver) and use agentCard.Url as the A2A endpoint.
+string a2aEndpoint = config.Gateway.Endpoint;
+bool effectiveStream = config.Stream;
+if (!string.IsNullOrEmpty(config.AgentId))
+{
+    var gateway = config.Gateway.Endpoint.TrimEnd('/');
+    var agentRoot = new Uri($"{gateway}/{config.AgentId}/");
+    var resolver = new A2ACardResolver(agentRoot, httpClient);
+    AgentCard agentCard;
+    try { agentCard = await resolver.GetAgentCardAsync(); }
+    catch (Exception ex)
+    {
+        Ink($"ERROR: failed to fetch agent card for '{config.AgentId}' at {agentRoot}: {ex.Message}\n", ConsoleColor.Red);
+        return;
+    }
+
+    a2aEndpoint = agentCard.Url;
+    if (config.Stream && !agentCard.Capabilities.Streaming)
+    {
+        if (config.Verbosity >= 1) Ink($"  note: agent '{agentCard.Name}' does not advertise streaming; falling back to sync\n", ConsoleColor.DarkYellow);
+        effectiveStream = false;
+    }
+
+    if (config.Verbosity >= 1)
+    {
+        Log("AGENT");
+        Console.WriteLine($"  id              {config.AgentId}");
+        Console.WriteLine($"  name            {agentCard.Name}");
+        Console.WriteLine($"  url             {agentCard.Url}");
+        Console.WriteLine($"  streaming       {agentCard.Capabilities.Streaming}");
+    }
+}
+
+var a2a = new A2AClient(new Uri(a2aEndpoint), httpClient);
 string? contextId = null;
 
 if (config.Verbosity >= 1)
 {
-    Log($"READY — {config.Gateway.Name} — {(config.Stream ? "Streaming" : "Sync")} — {config.Gateway.Endpoint}");
+    Log($"READY — {config.Gateway.Name} — {(effectiveStream ? "Streaming" : "Sync")} — {a2aEndpoint}");
     Console.WriteLine("Type a message. 'quit' to exit.\n");
 }
 
@@ -85,7 +122,7 @@ while (true)
         var sw = Stopwatch.StartNew();
         Dictionary<string, JsonElement>? responseMetadata = null;
 
-        if (config.Stream)
+        if (effectiveStream)
         {
             var previousText = string.Empty;
             await foreach (var sseItem in a2a.SendMessageStreamingAsync(new MessageSendParams { Message = msg }))
@@ -267,7 +304,7 @@ static Config? ParseArgs(string[] args)
         return null;
     }
 
-    string? token = a.Token, appId = a.AppId, endpoint = a.Endpoint, account = a.Account, tenant = a.Tenant;
+    string? token = a.Token, appId = a.AppId, endpoint = a.Endpoint, account = a.Account, tenant = a.Tenant, agentId = a.AgentId;
     bool graph = a.Graph, workiq = a.Workiq, showToken = a.ShowToken, stream = a.Stream;
     int verbosity = a.Verbosity;
     var headers = a.Headers;
@@ -294,6 +331,11 @@ static Config? ParseArgs(string[] args)
               --endpoint, -e   Override the gateway host (scheme + authority only, no path).
                                The gateway-specific path (/rp/workiq/ for Graph, /a2a/ for
                                Work IQ) is preserved automatically.
+              --agent-id, -A   Invoke a specific agent. The sample fetches the agent card
+                               from {gateway}/{agent-id}/.well-known/agent-card.json and
+                               uses agentCard.url as the A2A endpoint. Without --agent-id,
+                               the sample posts to the gateway endpoint directly (default
+                               agent for that gateway).
               --header, -H     Custom HTTP header in 'Key: Value' format (repeatable)
               --show-token     Print the raw JWT token (for reuse with --token)
               --stream         Use streaming mode (SSE via message/stream)
@@ -305,6 +347,7 @@ static Config? ParseArgs(string[] args)
               dotnet run -- --graph --token eyJ0eXAi...
               dotnet run -- --workiq --token WAM --appid <your-app-id>
               dotnet run -- --workiq --endpoint https://test.workiq.svc.cloud.dev.microsoft --token WAM --appid <your-app-id>
+              dotnet run -- --workiq --agent-id <AGENT_ID> --token WAM --appid <your-app-id>
             """);
         return null;
     }
@@ -335,7 +378,7 @@ static Config? ParseArgs(string[] args)
         gw = gw with { ExtraHeaders = [.. gw.ExtraHeaders, .. headers] };
     }
 
-    return new Config(token, appId ?? "", gw, account, tenant, showToken, verbosity, stream);
+    return new Config(token, appId ?? "", gw, account, tenant, agentId, showToken, verbosity, stream);
 }
 
 // ── Citations ─────────────────────────────────────────────────────────────
@@ -394,7 +437,7 @@ static void Ink(string s, ConsoleColor c) { Console.ForegroundColor = c; Console
 [DllImport("user32.dll", ExactSpelling = true)] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
 static IntPtr ConsoleWindowHandle() { var c = Win32GetConsoleWindow(); var r = GetAncestor(c, 3); return r != IntPtr.Zero ? r : c; }
 
-record Config(string Token, string AppId, GatewayConfig Gateway, string? Account, string? Tenant, bool ShowToken, int Verbosity, bool Stream);
+record Config(string Token, string AppId, GatewayConfig Gateway, string? Account, string? Tenant, string? AgentId, bool ShowToken, int Verbosity, bool Stream);
 
 // ── Gateway definitions ──────────────────────────────────────────────────
 

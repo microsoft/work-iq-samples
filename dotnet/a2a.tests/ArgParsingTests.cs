@@ -105,4 +105,36 @@ public class ArgParsingTests
         Assert.Null(r.Error);
         Assert.Equal(1, r.Verbosity);
     }
+
+    [Fact]
+    public void AgentId_LongFlag_Captured()
+    {
+        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--agent-id", "researcher-v2"]);
+        Assert.Null(r.Error);
+        Assert.Equal("researcher-v2", r.AgentId);
+    }
+
+    [Fact]
+    public void AgentId_ShortFlag_Captured()
+    {
+        var r = Helpers.ParseArgs(["--graph", "--token", "t", "-A", "researcher-v2"]);
+        Assert.Null(r.Error);
+        Assert.Equal("researcher-v2", r.AgentId);
+    }
+
+    [Fact]
+    public void AgentId_NotProvided_IsNull()
+    {
+        var r = Helpers.ParseArgs(["--graph", "--token", "t"]);
+        Assert.Null(r.Error);
+        Assert.Null(r.AgentId);
+    }
+
+    [Fact]
+    public void AgentId_MissingValue_ReturnsError()
+    {
+        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--agent-id"]);
+        Assert.NotNull(r.Error);
+        Assert.Contains("Missing value", r.Error);
+    }
 }

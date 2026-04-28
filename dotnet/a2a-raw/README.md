@@ -66,6 +66,60 @@ For Graph, override **both** `--endpoint` (path is different) and `--scope` (aud
 
 Add `--stream` to switch from `message/send` to `message/stream`.
 
+### Invoking a specific agent (`--agent-id`)
+
+Without `--agent-id`, the sample POSTs directly to `--endpoint` (the gateway's default agent). To target a specific agent:
+
+```bash
+dotnet run -- --agent-id <AGENT_ID> --token WAM --appid <APP_ID> --tenant <TENANT_ID>
+```
+
+The sample then does **two raw HTTP calls** — illustrating exactly what a non-.NET / no-SDK port would do:
+
+1. **Agent card fetch**:
+   ```
+   GET {endpoint}/{agent-id}/.well-known/agent-card.json
+   Authorization: Bearer <token>
+   ```
+   Response is the standard A2A agent card JSON. The sample parses three fields:
+   - `url` — where to POST messages for this agent
+   - `name` — friendly name (for logging)
+   - `capabilities.streaming` — whether `message/stream` is supported
+
+2. **Message post** — same JSON-RPC shape as before, but POSTed to `agentCard.url` (read from step 1) instead of `--endpoint`.
+
+If `--stream` is set but the agent's card has `capabilities.streaming = false`, the sample falls back to `message/send` automatically and prints a note.
+
+#### Agent card wire format (what the GET returns)
+
+```json
+{
+  "name": "Researcher Agent",
+  "description": "...",
+  "url": "https://substrate.office.com/m365Copilot/agents/<agent-id>/",
+  "version": "1.0",
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": false
+  },
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"],
+  "skills": [...]
+}
+```
+
+This is the [A2A AgentCard schema](https://a2a-protocol.org/latest/specification/#agent-card). Useful as a porting reference if you're implementing this in another language.
+
+#### How to find an agent ID
+
+Agent IDs are stable identifiers exposed by the gateway's agent registry (`{endpoint}/.agents`). For now, get them from product documentation or by querying the registry directly:
+
+```bash
+curl -H "Authorization: Bearer <token>" {endpoint}/.agents
+```
+
+A list-agents sample is on the roadmap.
+
 ### With a pre-obtained JWT (any platform)
 
 ```bash
@@ -103,6 +157,7 @@ You > quit
 | `--appid, -a` | Entra app client ID (required with `WAM`) |
 | `--tenant, -T` | Tenant ID or domain. Required with `WAM` for single-tenant apps; defaults to `common` for multi-tenant. |
 | `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
+| `--agent-id, -A` | Invoke a specific agent (fetches `.well-known/agent-card.json` and POSTs to `agentCard.url`) |
 | `--stream` | Use streaming mode (`message/stream` via SSE) |
 | `--all-headers` | Print every response header (default: only diagnostic ones) |
 

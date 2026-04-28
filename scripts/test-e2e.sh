@@ -27,6 +27,7 @@ set -euo pipefail
 #   --appid <guid>       Existing App ID (requires --skip-setup)
 #   --keep-app           Don't delete the app on exit
 #   --log-dir <path>     Where to write per-run logs (default: ./test-logs)
+#   --agent-id <id>      Pass --agent-id to a2a + a2a-raw runs (REST ignores it)
 
 # ── Defaults ────────────────────────────────────────────────────────────
 ACCOUNT=""
@@ -40,6 +41,7 @@ SKIP_SETUP="false"
 APP_ID=""
 KEEP_APP="false"
 LOG_DIR="./test-logs"
+AGENT_ID=""
 
 # ── CLI parsing ─────────────────────────────────────────────────────────
 show_help() { sed -n '3,29p' "$0" | sed 's/^# \{0,1\}//'; }
@@ -57,6 +59,7 @@ while [[ $# -gt 0 ]]; do
     --appid) APP_ID="$2"; shift 2 ;;
     --keep-app) KEEP_APP="true"; shift ;;
     --log-dir) LOG_DIR="$2"; shift 2 ;;
+    --agent-id) AGENT_ID="$2"; shift 2 ;;
     -h|--help) show_help; exit 0 ;;
     *) echo "Unknown flag: $1" >&2; show_help; exit 1 ;;
   esac
@@ -213,6 +216,10 @@ run_sample() {
   local stream_flag=""
   [[ "$mode" == "stream" ]] && stream_flag="--stream"
 
+  # When --agent-id is provided, append it to a2a / a2a-raw commands (REST doesn't support it)
+  local agent_flag=""
+  [[ -n "$AGENT_ID" && "$sample" != "rest" ]] && agent_flag="--agent-id $AGENT_ID"
+
   local cmd
   case "$sample" in
     rest|a2a)
@@ -223,6 +230,7 @@ run_sample() {
            --tenant "$TENANT_ID"
            --account "$ACCOUNT"
            $stream_flag
+           $agent_flag
            -v 2)
       ;;
     a2a-raw)
@@ -235,7 +243,8 @@ run_sample() {
              --appid "$APP_ID"
              --tenant "$TENANT_ID"
              --account "$ACCOUNT"
-             $stream_flag)
+             $stream_flag
+             $agent_flag)
       else
         # workiq: defaults are correct
         cmd=(dotnet run --project "$project" --
@@ -243,7 +252,8 @@ run_sample() {
              --appid "$APP_ID"
              --tenant "$TENANT_ID"
              --account "$ACCOUNT"
-             $stream_flag)
+             $stream_flag
+             $agent_flag)
       fi
       ;;
     *)

@@ -33,7 +33,7 @@ if (parsed.Error != null)
 // To target Graph RP instead, override both --endpoint and --scope.
 string endpoint = parsed.Endpoint ?? "https://workiq.svc.cloud.microsoft/a2a/";
 string scope = parsed.Scope ?? "api://workiq.svc.cloud.microsoft/.default";
-string? token = parsed.Token, appId = parsed.AppId, account = parsed.Account, tenant = parsed.Tenant;
+string? token = parsed.Token, appId = parsed.AppId, account = parsed.Account, tenant = parsed.Tenant, agentId = parsed.AgentId;
 bool stream = parsed.Stream, allHeaders = parsed.AllHeaders;
 
 if (string.IsNullOrEmpty(token))
@@ -66,6 +66,59 @@ if (token.Equals("WAM", StringComparison.OrdinalIgnoreCase))
 var http = new HttpClient();
 http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+// ── Agent card resolution (when --agent-id is set) ───────────────────────
+//
+// This sample deliberately does the agent-card fetch in raw HTTP + JSON to
+// show what the wire interaction looks like. With --agent-id the sample:
+//   1. GET {endpoint}/{agentId}/.well-known/agent-card.json
+//   2. Parse the JSON to find:   url, name, capabilities.streaming
+//   3. Replace the POST target with agentCard.url
+//
+// Without --agent-id the sample posts directly to the gateway endpoint
+// (i.e., the default agent for that gateway).
+if (!string.IsNullOrEmpty(agentId))
+{
+    var cardUri = $"{endpoint.TrimEnd('/')}/{agentId}/.well-known/agent-card.json";
+    try
+    {
+        var cardRes = await http.GetAsync(cardUri);
+        if (!cardRes.IsSuccessStatusCode)
+        {
+            Console.Error.WriteLine($"ERROR: failed to fetch agent card: {(int)cardRes.StatusCode} {cardRes.StatusCode} from {cardUri}");
+            return;
+        }
+
+        var cardJson = await cardRes.Content.ReadAsStringAsync();
+        using var cardDoc = JsonDocument.Parse(cardJson);
+        var root = cardDoc.RootElement;
+
+        var resolvedUrl = root.GetProperty("url").GetString()
+            ?? throw new InvalidOperationException("agent-card.json has no 'url' field");
+        var resolvedName = root.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+        var streamingSupported = root.TryGetProperty("capabilities", out var caps)
+            && caps.TryGetProperty("streaming", out var s) && s.GetBoolean();
+
+        Console.WriteLine($"Agent card:");
+        Console.WriteLine($"  id              {agentId}");
+        Console.WriteLine($"  name            {resolvedName}");
+        Console.WriteLine($"  url             {resolvedUrl}");
+        Console.WriteLine($"  streaming       {streamingSupported}");
+
+        if (stream && !streamingSupported)
+        {
+            Console.WriteLine("  note: agent does not advertise streaming; falling back to sync");
+            stream = false;
+        }
+
+        endpoint = resolvedUrl;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"ERROR: failed to resolve agent '{agentId}': {ex.Message}");
+        return;
+    }
+}
 
 string? contextId = null;
 
@@ -415,6 +468,11 @@ void PrintUsage()
       --endpoint, -e   Agent URL. Defaults to the Work IQ Gateway A2A endpoint:
                        https://workiq.svc.cloud.microsoft/a2a/
                        Override to target other rings (e.g., ppe./test.) or Graph RP.
+      --agent-id, -A   Invoke a specific agent. The sample fetches
+                       {endpoint}/{agent-id}/.well-known/agent-card.json,
+                       reads agentCard.url, and POSTs JSON-RPC there.
+                       Without --agent-id, the sample posts directly to
+                       --endpoint (default agent for that gateway).
       --scope, -s      Token scope for WAM. Defaults to the Work IQ audience:
                        api://workiq.svc.cloud.microsoft/.default
                        For Graph RP use: https://graph.microsoft.com/.default

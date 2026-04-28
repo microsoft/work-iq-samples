@@ -89,4 +89,36 @@ public class ArgParsingTests
         Assert.Null(r.Endpoint);
         Assert.Null(r.Token);
     }
+
+    [Fact]
+    public void AgentId_LongFlag_Captured()
+    {
+        var r = Helpers.ParseArgs(["-e", "https://example.com", "-t", "tok", "--agent-id", "researcher-v2"]);
+        Assert.Null(r.Error);
+        Assert.Equal("researcher-v2", r.AgentId);
+    }
+
+    [Fact]
+    public void AgentId_ShortFlag_Captured()
+    {
+        var r = Helpers.ParseArgs(["-e", "https://example.com", "-t", "tok", "-A", "researcher-v2"]);
+        Assert.Null(r.Error);
+        Assert.Equal("researcher-v2", r.AgentId);
+    }
+
+    [Fact]
+    public void AgentId_NotProvided_IsNull()
+    {
+        var r = Helpers.ParseArgs(["-e", "https://example.com", "-t", "tok"]);
+        Assert.Null(r.Error);
+        Assert.Null(r.AgentId);
+    }
+
+    [Fact]
+    public void AgentId_MissingValue_ReturnsError()
+    {
+        var r = Helpers.ParseArgs(["-e", "https://example.com", "-t", "tok", "--agent-id"]);
+        Assert.NotNull(r.Error);
+        Assert.Contains("Missing value", r.Error);
+    }
 }

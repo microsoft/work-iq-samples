@@ -56,6 +56,35 @@ dotnet run -- --graph --token WAM --appid <APP_ID> --tenant <TENANT_ID>
 
 Add `--stream` to switch from `message/send` (sync) to `message/stream` (SSE).
 
+### Invoking a specific agent (`--agent-id`)
+
+Without `--agent-id`, the sample posts directly to the gateway endpoint (default agent for that gateway). To invoke a specific agent, pass `--agent-id <id>`:
+
+```bash
+dotnet run -- --workiq --agent-id <AGENT_ID> --token WAM \
+  --appid <APP_ID> --tenant <TENANT_ID>
+```
+
+The sample then:
+
+1. Fetches the agent card from `{gateway}/{agent-id}/.well-known/agent-card.json` via the A2A SDK's `A2ACardResolver`.
+2. Reads `agentCard.url`, `agentCard.name`, `agentCard.capabilities.streaming` from the response.
+3. Uses `agentCard.url` (not the gateway endpoint) as the target for `A2AClient`.
+4. Falls back to sync mode if `--stream` is set but the agent doesn't advertise streaming (a note prints at `-v >= 1`).
+
+Same pattern works for `--graph`:
+
+```bash
+dotnet run -- --graph --agent-id <AGENT_ID> --token WAM \
+  --appid <APP_ID> --tenant <TENANT_ID>
+```
+
+#### How to find an agent ID
+
+Agent IDs are stable identifiers exposed by the gateway's agent registry. **For now**, you'll get them from product documentation or by listing the registry yourself (a future sample / tool will surface this; out of scope today). A list-agents sample is on the roadmap.
+
+The Work IQ default agent (BizChat-as-GPT scenario) has id `bizchat-as-gpt-scenario` — but you don't need `--agent-id` to invoke it; not specifying any agent already routes there.
+
 ### With a pre-obtained JWT (any platform)
 
 ```bash
@@ -99,6 +128,7 @@ If the `── TOKEN ──` block shows an `aud` that matches the gateway and `
 | `--tenant, -T` | Tenant ID or domain. Required with `WAM` for single-tenant apps; defaults to `common` for multi-tenant. |
 | `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
 | `--endpoint, -e` | Override the gateway host (scheme + authority only, no path) |
+| `--agent-id, -A` | Invoke a specific agent (fetches `{gateway}/{agent-id}/.well-known/agent-card.json` and posts to `agentCard.url`) |
 | `--stream` | Use streaming mode (`message/stream` via SSE) |
 | `--header, -H` | Custom request header (repeatable) |
 | `--show-token` | Print the raw JWT after decoding |
