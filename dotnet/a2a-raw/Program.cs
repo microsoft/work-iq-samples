@@ -487,9 +487,6 @@ void PrintUsage()
       # Work IQ Gateway (uses defaults)
       dotnet run -- -t WAM -a <appid>
 
-      # Work IQ PPE ring (PFT path)
-      dotnet run -- -e https://ppe.workiq.svc.cloud.dev.microsoft/a2a/ -t WAM -a <appid>
-
       # Graph RP (override both)
       dotnet run -- -e https://graph.microsoft.com/rp/workiq/ -s https://graph.microsoft.com/.default -t WAM -a <appid>
 

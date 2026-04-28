@@ -16,7 +16,7 @@ Sample clients for the [Work IQ](https://learn.microsoft.com/en-us/microsoft-365
 
 The samples target one of two gateways:
 
-- **Work IQ Gateway** (`workiq.svc.cloud.microsoft`, and dev-ring variants `ppe.workiq.svc.cloud.dev.microsoft` / `test.workiq.svc.cloud.dev.microsoft`) — the dedicated entry point for Work IQ and Copilot Chat. Uses the Work IQ app ID + `WorkIQAgent.Ask` delegated scope.
+- **Work IQ Gateway** (`workiq.svc.cloud.microsoft`) — the dedicated entry point for Work IQ and Copilot Chat. Uses the Work IQ app ID + `WorkIQAgent.Ask` delegated scope.
 - **Microsoft Graph** (`graph.microsoft.com`) — the public Graph surface serving the same Copilot Chat API under `/beta/copilot/*`. Uses the Microsoft Graph app ID + seven delegated Graph scopes.
 
 The .NET samples support both via `--workiq` / `--graph` flags. The Rust and Swift samples target Graph today.
@@ -103,7 +103,7 @@ Note that tokens acquired through `az account get-access-token` carry the Azure 
 | Same error, but redirect URI is present | Single-tenant app + `/common` authority mismatch | Pass `--tenant <TENANT_ID>` so MSAL uses the tenant-specific authority |
 | `403 Forbidden` with `Required scopes = [Sites.Read.All, ...]` | Graph delegated permissions not added + admin-consented on the app | Admin runs `scripts/admin-setup.sh --graph` (or adds the 7 permissions manually + grants admin consent) |
 | `403 Forbidden` without a scope message | User is missing the Microsoft 365 Copilot license | Assign the license; wait 15–30 min for propagation |
-| `400 BadRequest: Invalid request, no valid route` | Using `--endpoint` with an unexpected path on the Work IQ Gateway | Pass host-only to `--endpoint` (e.g. `https://ppe.workiq.svc.cloud.dev.microsoft`); samples append the correct path |
+| `400 BadRequest: Invalid request, no valid route` | Using `--endpoint` with an unexpected path on the Work IQ Gateway | Pass host-only to `--endpoint` (scheme + authority, no path); samples append the correct path |
 | `400 AuthenticationError: Error authenticating with resource` | Gateway rejected the downstream auth exchange (e.g., OBO against an unconfigured downstream service) | Check the request-id in the response headers against the gateway's logs |
 | WAM re-prompts for password on every `dotnet run` | MSAL in-process cache doesn't persist across processes | Expected today. A future update may add an opt-in persistent cache. |
 | `AADSTS65001: consent required` | Admin hasn't consented to the required permissions | Ask admin to run `admin-consent` (step 6 of the setup) |

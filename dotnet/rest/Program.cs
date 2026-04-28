@@ -428,7 +428,6 @@ static Config? ParseArgs(string[] args)
               dotnet run -- --graph --token WAM --appid <your-app-id>
               dotnet run -- --graph --token WAM --appid <your-app-id> --stream
               dotnet run -- --workiq --token WAM --appid <your-app-id>
-              dotnet run -- --workiq --endpoint https://test.workiq.svc.cloud.dev.microsoft --token WAM --appid <your-app-id>
               dotnet run -- --graph --token eyJ0eXAi...
             """);
         return null;

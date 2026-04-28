@@ -38,15 +38,6 @@ dotnet run -- --workiq --token WAM --appid <APP_ID> --tenant <TENANT_ID>
 
 Type a message, see a response, type `quit` to exit.
 
-### Against the Work IQ Gateway, a specific ring (e.g. `ppe.`)
-
-```bash
-dotnet run -- --workiq --endpoint https://ppe.workiq.svc.cloud.dev.microsoft \
-  --token WAM --appid <APP_ID> --tenant <TENANT_ID>
-```
-
-`--endpoint` takes **host-only** (scheme + authority). The sample appends `/rest/beta` automatically.
-
 ### Against Microsoft Graph
 
 ```bash

@@ -346,7 +346,6 @@ static Config? ParseArgs(string[] args)
               dotnet run -- --graph --token WAM --appid <your-app-id> --account user@contoso.com
               dotnet run -- --graph --token eyJ0eXAi...
               dotnet run -- --workiq --token WAM --appid <your-app-id>
-              dotnet run -- --workiq --endpoint https://test.workiq.svc.cloud.dev.microsoft --token WAM --appid <your-app-id>
               dotnet run -- --workiq --agent-id <AGENT_ID> --token WAM --appid <your-app-id>
             """);
         return null;

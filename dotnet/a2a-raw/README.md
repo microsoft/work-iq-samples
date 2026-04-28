@@ -43,15 +43,6 @@ dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
 
 Type a message, see a response, type `quit` to exit.
 
-### Against the Work IQ Gateway, a specific ring (e.g., `ppe.`)
-
-```bash
-dotnet run -- --endpoint https://ppe.workiq.svc.cloud.dev.microsoft/a2a/ \
-  --token WAM --appid <APP_ID> --tenant <TENANT_ID>
-```
-
-The raw sample takes the **full URL** in `--endpoint` (including the `/a2a/` path) — unlike the SDK sample, there are no gateway presets.
-
 ### Against Microsoft Graph
 
 ```bash
