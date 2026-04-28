@@ -12,14 +12,11 @@ Sample clients for the [Work IQ](https://learn.microsoft.com/en-us/microsoft-365
 
 ---
 
-## Gateways
+## Gateway
 
-The samples target one of two gateways:
+All .NET samples target the **Work IQ Gateway** (`workiq.svc.cloud.microsoft`) — the dedicated entry point for Work IQ and Copilot Chat. Token audience: `api://workiq.svc.cloud.microsoft`; delegated scope: `WorkIQAgent.Ask`.
 
-- **Work IQ Gateway** (`workiq.svc.cloud.microsoft`) — the dedicated entry point for Work IQ and Copilot Chat. Uses the Work IQ app ID + `WorkIQAgent.Ask` delegated scope.
-- **Microsoft Graph** (`graph.microsoft.com`) — the public Graph surface serving the same Copilot Chat API under `/beta/copilot/*`. Uses the Microsoft Graph app ID + seven delegated Graph scopes.
-
-The .NET samples support both via `--workiq` / `--graph` flags. The Rust and Swift samples target Graph today.
+> The Rust and Swift samples in this repo target Microsoft Graph today and have not been migrated yet.
 
 ---
 
@@ -39,13 +36,13 @@ You (or your tenant admin) must create an Entra app registration with specific p
 - **If you're the admin** — from the repo root:
   ```bash
   # Bash / WSL / macOS / Linux
-  scripts/admin-setup.sh --workiq
+  scripts/admin-setup.sh
   ```
   ```powershell
   # PowerShell
-  scripts\admin-setup.ps1 -Gateway WorkIQ
+  scripts\admin-setup.ps1
   ```
-  Use `--graph` or `--both` to configure Graph permissions as well. See [`ADMIN_SETUP.md`](ADMIN_SETUP.md) for all flags and the manual CLI / portal paths.
+  See [`ADMIN_SETUP.md`](ADMIN_SETUP.md) for all flags and the manual CLI / portal paths.
 
 - **If you're not the admin** — hand [`ADMIN_SETUP.md`](ADMIN_SETUP.md) to them. They'll give you back an **App ID** and **Tenant ID**.
 
@@ -63,7 +60,7 @@ Uses the Windows broker for silent SSO. A browser-less sign-in popup appears on 
 
 ```bash
 cd dotnet/rest
-dotnet run -- --workiq --token WAM --appid <APP_ID> --tenant <TENANT_ID>
+dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
 ```
 
 > **Note:** WAM is only available on Windows. On macOS and Linux, MSAL falls back to an interactive browser sign-in using the `http://localhost` redirect URI — same command works.
@@ -78,16 +75,12 @@ cargo run -- --appid <APP_ID>
 
 ### Pre-obtained JWT token — all platforms, all samples
 
-Acquire a token externally (e.g., via [Graph Explorer](https://developer.microsoft.com/en-us/graph/graph-explorer), `az account get-access-token`, or your own MSAL code) and pass it directly:
+Acquire a token externally (e.g., via `az account get-access-token`, or your own MSAL code) and pass it directly:
 
 ```bash
-# Example: audience = Graph
-TOKEN=$(az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv)
-dotnet run -- --graph --token "$TOKEN"
-
-# Example: audience = Work IQ
+# Audience = Work IQ
 TOKEN=$(az account get-access-token --resource api://workiq.svc.cloud.microsoft --query accessToken -o tsv)
-dotnet run -- --workiq --token "$TOKEN"
+dotnet run -- --token "$TOKEN"
 ```
 
 Note that tokens acquired through `az account get-access-token` carry the Azure CLI's client app ID (`04b07795-...`), not your test app. Use this for quick probes, not end-to-end client-identity validation.
@@ -101,13 +94,12 @@ Note that tokens acquired through `az account get-access-token` carry the Azure 
 | `MsalClientException: window_handle_required` | Running `dotnet run` from a context where the console window handle can't be resolved (e.g., piped stdin, some non-interactive shells) | Run from an interactive terminal, or use `--token <jwt>` with a pre-obtained token |
 | `WAM_provider_error 3399614466 / IncorrectConfiguration` | App registration missing the WAM broker redirect URI `ms-appx-web://microsoft.aad.brokerplugin/{appId}` | Ask admin to re-run setup (or add that redirect URI manually). See [`ADMIN_SETUP.md`](ADMIN_SETUP.md). |
 | Same error, but redirect URI is present | Single-tenant app + `/common` authority mismatch | Pass `--tenant <TENANT_ID>` so MSAL uses the tenant-specific authority |
-| `403 Forbidden` with `Required scopes = [Sites.Read.All, ...]` | Graph delegated permissions not added + admin-consented on the app | Admin runs `scripts/admin-setup.sh --graph` (or adds the 7 permissions manually + grants admin consent) |
 | `403 Forbidden` without a scope message | User is missing the Microsoft 365 Copilot license | Assign the license; wait 15–30 min for propagation |
 | `400 BadRequest: Invalid request, no valid route` | Using `--endpoint` with an unexpected path on the Work IQ Gateway | Pass host-only to `--endpoint` (scheme + authority, no path); samples append the correct path |
 | `400 AuthenticationError: Error authenticating with resource` | Gateway rejected the downstream auth exchange (e.g., OBO against an unconfigured downstream service) | Check the request-id in the response headers against the gateway's logs |
 | WAM re-prompts for password on every `dotnet run` | MSAL in-process cache doesn't persist across processes | Expected today. A future update may add an opt-in persistent cache. |
 | `AADSTS65001: consent required` | Admin hasn't consented to the required permissions | Ask admin to run `admin-consent` (step 6 of the setup) |
-| `401 Unauthorized` | Token audience mismatch | Ensure the token `aud` matches the gateway — `https://graph.microsoft.com` for Graph or `fdcc1f02-...`/`api://workiq.svc.cloud.microsoft` for Work IQ |
+| `401 Unauthorized` | Token audience mismatch | Ensure the token `aud` is `fdcc1f02-...` / `api://workiq.svc.cloud.microsoft` |
 | Empty or degraded responses | License just assigned, index not ready | Wait 15–30 minutes after license assignment |
 
 ---
@@ -117,7 +109,6 @@ Note that tokens acquired through `az account get-access-token` carry the Azure 
 - [Work IQ overview](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/workiq-overview)
 - [Copilot Chat API](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview)
 - [A2A protocol specification](https://a2a-protocol.org/latest/specification/)
-- [Microsoft Graph permissions reference](https://learn.microsoft.com/en-us/graph/permissions-reference)
 - [MSAL.NET documentation](https://learn.microsoft.com/en-us/entra/msal/dotnet/)
 - [`ADMIN_SETUP.md`](ADMIN_SETUP.md) — detailed admin setup guide
 - [`scripts/admin-setup.sh`](scripts/admin-setup.sh) / [`scripts/admin-setup.ps1`](scripts/admin-setup.ps1) — unified app-registration scripts

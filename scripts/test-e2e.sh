@@ -4,20 +4,19 @@ set -euo pipefail
 # Work IQ Samples — End-to-End Test Script
 #
 # Creates a fresh app registration via admin-setup.sh, then runs each
-# .NET sample across the full (gateway, mode) matrix and deletes the app
-# on exit. Each invocation is interactive: send a message when prompted,
-# type 'quit' to move on to the next.
+# .NET sample across the (mode) matrix against the Work IQ Gateway and
+# deletes the app on exit. Each invocation is interactive: send a
+# message when prompted, type 'quit' to move on to the next.
 #
 # Requires: Azure CLI (logged in), .NET 10 SDK.
 #
 # Usage:
 #   scripts/test-e2e.sh --account user@tenant.com
-#   scripts/test-e2e.sh --account user@tenant.com --gateway workiq --modes sync
+#   scripts/test-e2e.sh --account user@tenant.com --modes sync
 #   scripts/test-e2e.sh --account user@tenant.com --samples rest,a2a --keep-app
 #
 # Flags:
 #   --account <email>    Required. The user signing in via WAM.
-#   --gateway <g>        graph | workiq | both (default: both)
 #   --samples <list>     Comma-separated: rest,a2a,a2a-raw (default: all)
 #   --modes <list>       Comma-separated: sync,stream (default: both)
 #   --name <name>        App display name (default: "WIQ E2E Test <timestamp>")
@@ -31,7 +30,6 @@ set -euo pipefail
 
 # ── Defaults ────────────────────────────────────────────────────────────
 ACCOUNT=""
-GATEWAY="both"
 SAMPLES="rest,a2a,a2a-raw"
 MODES="sync,stream"
 APP_NAME="WIQ E2E Test $(date +%Y%m%d-%H%M%S)"
@@ -49,7 +47,6 @@ show_help() { sed -n '3,29p' "$0" | sed 's/^# \{0,1\}//'; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --account) ACCOUNT="$2"; shift 2 ;;
-    --gateway) GATEWAY="$2"; shift 2 ;;
     --samples) SAMPLES="$2"; shift 2 ;;
     --modes) MODES="$2"; shift 2 ;;
     --name) APP_NAME="$2"; shift 2 ;;
@@ -128,7 +125,6 @@ trap 'cleanup 130' INT TERM
 echo "Work IQ Samples — End-to-End Test"
 echo "  Tenant:    $TENANT_ID"
 echo "  Account:   $ACCOUNT"
-echo "  Gateway:   $GATEWAY"
 echo "  Samples:   $SAMPLES"
 echo "  Modes:     $MODES"
 echo "  App name:  $APP_NAME"
@@ -140,14 +136,7 @@ if [[ "$SKIP_SETUP" == "true" ]]; then
   echo "── Step 1: Using existing app $APP_ID (--skip-setup) ──"
 else
   echo "── Step 1: Creating app registration via admin-setup.sh ──"
-  # admin-setup needs all perms for the full matrix
-  SETUP_GATEWAY="$GATEWAY"
-  if [[ "$GATEWAY" != "both" ]]; then
-    SETUP_GATEWAY="$GATEWAY"
-  else
-    SETUP_GATEWAY="both"
-  fi
-  "$SCRIPT_DIR/admin-setup.sh" --$SETUP_GATEWAY --name "$APP_NAME" --tenant "$TENANT_ID" 2>&1 | tee "$LOG_DIR/00-admin-setup.log" | tail -30
+  "$SCRIPT_DIR/admin-setup.sh" --name "$APP_NAME" --tenant "$TENANT_ID" 2>&1 | tee "$LOG_DIR/00-admin-setup.log" | tail -30
   APP_ID=$(az ad app list --display-name "$APP_NAME" --query "[0].appId" -o tsv)
   if [[ -z "$APP_ID" ]]; then
     echo "ERROR: Could not look up created App ID by name '$APP_NAME'." >&2
@@ -171,19 +160,12 @@ echo ""
 # Parse comma-separated lists into bash arrays
 IFS=',' read -ra SAMPLE_ARR <<<"$SAMPLES"
 IFS=',' read -ra MODE_ARR <<<"$MODES"
-if [[ "$GATEWAY" == "both" ]]; then
-  GATEWAY_ARR=("graph" "workiq")
-else
-  GATEWAY_ARR=("$GATEWAY")
-fi
 
 # Pre-compute totals for nice counters
 TOTAL=0
 for s in "${SAMPLE_ARR[@]}"; do
-  for g in "${GATEWAY_ARR[@]}"; do
-    for m in "${MODE_ARR[@]}"; do
-      TOTAL=$((TOTAL + 1))
-    done
+  for m in "${MODE_ARR[@]}"; do
+    TOTAL=$((TOTAL + 1))
   done
 done
 
@@ -205,11 +187,10 @@ FAILED=()
 
 run_sample() {
   local sample="$1"
-  local gateway="$2"
-  local mode="$3"
+  local mode="$2"
   RUN_IDX=$((RUN_IDX + 1))
-  local label="$RUN_IDX/$TOTAL  $sample / $gateway / $mode"
-  local log_file="$LOG_DIR/$(printf '%02d' $RUN_IDX)-${sample}-${gateway}-${mode}.log"
+  local label="$RUN_IDX/$TOTAL  $sample / $mode"
+  local log_file="$LOG_DIR/$(printf '%02d' $RUN_IDX)-${sample}-${mode}.log"
 
   # Build the command per sample
   local project="$REPO_ROOT/dotnet/$sample"
@@ -222,39 +203,14 @@ run_sample() {
 
   local cmd
   case "$sample" in
-    rest|a2a)
+    rest|a2a|a2a-raw)
       cmd=(dotnet run --project "$project" --
-           --$gateway
            --token WAM
            --appid "$APP_ID"
            --tenant "$TENANT_ID"
            --account "$ACCOUNT"
            $stream_flag
-           $agent_flag
-           -v 2)
-      ;;
-    a2a-raw)
-      # a2a-raw takes --endpoint + --scope directly; no --graph/--workiq flag
-      if [[ "$gateway" == "graph" ]]; then
-        cmd=(dotnet run --project "$project" --
-             --endpoint "https://graph.microsoft.com/rp/workiq/"
-             --scope "https://graph.microsoft.com/.default"
-             --token WAM
-             --appid "$APP_ID"
-             --tenant "$TENANT_ID"
-             --account "$ACCOUNT"
-             $stream_flag
-             $agent_flag)
-      else
-        # workiq: defaults are correct
-        cmd=(dotnet run --project "$project" --
-             --token WAM
-             --appid "$APP_ID"
-             --tenant "$TENANT_ID"
-             --account "$ACCOUNT"
-             $stream_flag
-             $agent_flag)
-      fi
+           $agent_flag)
       ;;
     *)
       echo "  SKIP: unknown sample '$sample'" >&2
@@ -297,10 +253,8 @@ run_sample() {
 }
 
 for sample in "${SAMPLE_ARR[@]}"; do
-  for gateway in "${GATEWAY_ARR[@]}"; do
-    for mode in "${MODE_ARR[@]}"; do
-      run_sample "$sample" "$gateway" "$mode"
-    done
+  for mode in "${MODE_ARR[@]}"; do
+    run_sample "$sample" "$mode"
   done
 done
 

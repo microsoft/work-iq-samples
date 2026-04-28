@@ -1,6 +1,6 @@
-// WorkIQ REST Sample — Interactive Copilot Chat via Microsoft Graph or Work IQ Gateway
+// WorkIQ REST Sample — Interactive Copilot Chat via the Work IQ Gateway
 // Supports both synchronous (/chat) and streaming (/chatOverStream) modes.
-// Usage: dotnet run -- <--graph|--workiq> --token <JWT|WAM> --appid <clientId> [--endpoint <url>] [--stream] [--account <email>]
+// Usage: dotnet run -- --token <JWT|WAM> --appid <clientId> [--endpoint <url>] [--stream] [--account <email>]
 // Docs:  https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview
 
 using System.Diagnostics;
@@ -12,25 +12,19 @@ using System.Text.Json;
 using Microsoft.Identity.Client;
 using Microsoft.Identity.Client.Broker;
 
-// Per-gateway (host, path) defaults. --endpoint overrides only the host
-// (scheme + authority); the path is fixed per gateway by its routing convention.
-const string GraphHost = "https://graph.microsoft.com";
-const string GraphPath = "/beta/copilot";
+// --endpoint overrides only the host (scheme + authority); the path is fixed.
+// Work IQ Gateway multiplexes REST/A2A/MCP at one host via path prefix
+// (/rest, /a2a, /tools). AGS Slice R strips the /rest prefix before forwarding.
 const string WorkIQDefaultHost = "https://workiq.svc.cloud.microsoft";
-// Work IQ Gateway multiplexes REST/A2A/MCP at one host via path prefix (/rest, /a2a, /tools).
-// AGS Slice R strips the /rest prefix before forwarding.
 const string WorkIQPath = "/rest/beta";
 
 var config = ParseArgs(args);
 if (config == null) return;
 
-var (defaultHost, gatewayPath) = config.Gateway == "workiq"
-    ? (WorkIQDefaultHost, WorkIQPath)
-    : (GraphHost, GraphPath);
 var host = !string.IsNullOrEmpty(config.Endpoint)
     ? config.Endpoint.TrimEnd('/')
-    : defaultHost;
-var apiBase = host + gatewayPath;
+    : WorkIQDefaultHost;
+var apiBase = host + WorkIQPath;
 
 string token;
 IPublicClientApplication? msalApp = null;
@@ -38,7 +32,7 @@ IAccount? msalAccount = null;
 
 if (config.Token.Equals("WAM", StringComparison.OrdinalIgnoreCase))
 {
-    var r = await AcquireWamToken(config.AppId, config.Account, config.Gateway, config.Tenant);
+    var r = await AcquireWamToken(config.AppId, config.Account, config.Tenant);
     token = r.token; msalApp = r.app; msalAccount = r.account;
 }
 else
@@ -66,7 +60,7 @@ string? conversationId = null;
 
 if (config.Verbosity >= 1)
 {
-    Log($"READY — {(config.Stream ? "Streaming" : "Synchronous")} mode ({config.Gateway})");
+    Log($"READY — {(config.Stream ? "Streaming" : "Synchronous")} mode (Work IQ Gateway)");
     Console.WriteLine("Type a message. 'quit' to exit.\n");
 }
 
@@ -81,7 +75,7 @@ while (true)
     {
         try
         {
-            var r = await AcquireWamToken(config.AppId, config.Account, config.Gateway, config.Tenant, msalApp, msalAccount);
+            var r = await AcquireWamToken(config.AppId, config.Account, config.Tenant, msalApp, msalAccount);
             token = r.token; msalAccount = r.account;
             httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         }
@@ -304,7 +298,7 @@ static string BuildChatBody(string message) => WorkIQ.Rest.Helpers.BuildChatBody
 // ── WAM auth ─────────────────────────────────────────────────────────────
 
 static async Task<(string token, IPublicClientApplication app, IAccount? account)> AcquireWamToken(
-    string clientId, string? accountHint, string gateway = "graph", string? tenantId = null,
+    string clientId, string? accountHint, string? tenantId = null,
     IPublicClientApplication? existingApp = null, IAccount? existingAccount = null)
 {
     var app = existingApp;
@@ -325,9 +319,7 @@ static async Task<(string token, IPublicClientApplication app, IAccount? account
         app = builder.Build();
     }
 
-    string[] scopes = gateway == "workiq"
-        ? ["api://workiq.svc.cloud.microsoft/.default"]
-        : ["https://graph.microsoft.com/.default"];
+    string[] scopes = ["api://workiq.svc.cloud.microsoft/.default"];
     AuthenticationResult result;
 
     try
@@ -393,20 +385,16 @@ static Config? ParseArgs(string[] args)
     }
 
     string? token = a.Token, appId = a.AppId, account = a.Account, endpoint = a.Endpoint, tenant = a.Tenant;
-    bool graph = a.Graph, workiq = a.Workiq, stream = a.Stream, showToken = a.ShowToken;
+    bool stream = a.Stream, showToken = a.ShowToken;
     int verbosity = a.Verbosity;
     var headers = a.Headers;
 
-    if (string.IsNullOrEmpty(token) || (!graph && !workiq))
+    if (string.IsNullOrEmpty(token))
     {
         Console.WriteLine("""
-            WorkIQ REST Sample — Interactive Copilot Chat via Microsoft Graph or Work IQ Gateway
+            WorkIQ REST Sample — Interactive Copilot Chat against the Work IQ Gateway
 
-            Usage: dotnet run -- <gateway> --token <JWT|WAM> --appid <clientId> [options]
-
-            Gateway (exactly one required):
-              --graph          Use Microsoft Graph API
-              --workiq         Use Work IQ Gateway (default: workiq.svc.cloud.microsoft)
+            Usage: dotnet run -- --token <JWT|WAM> --appid <clientId> [options]
 
             Auth:
               --token, -t      Bearer token or 'WAM' for Windows broker auth
@@ -417,25 +405,17 @@ static Config? ParseArgs(string[] args)
 
             Options:
               --endpoint, -e   Override the gateway host (scheme + authority only, no path).
-                               The gateway-specific path (/beta/copilot for Graph,
-                               /rest/beta for Work IQ) is appended automatically.
+                               The /rest/beta path is appended automatically.
               --header, -H     Custom HTTP header in 'Key: Value' format (repeatable)
               --stream         Use streaming mode (SSE via /chatOverStream)
               --show-token     Print the raw JWT token (for reuse)
               -v, --verbosity  0 = response only, 1 = default, 2 = full wire, 3 = all response headers
 
             Examples:
-              dotnet run -- --graph --token WAM --appid <your-app-id>
-              dotnet run -- --graph --token WAM --appid <your-app-id> --stream
-              dotnet run -- --workiq --token WAM --appid <your-app-id>
-              dotnet run -- --graph --token eyJ0eXAi...
+              dotnet run -- --token WAM --appid <your-app-id> --tenant <your-tenant>
+              dotnet run -- --token WAM --appid <your-app-id> --stream
+              dotnet run -- --token eyJ0eXAi...
             """);
-        return null;
-    }
-
-    if (graph && workiq)
-    {
-        Ink("ERROR: specify --graph or --workiq, not both\n", ConsoleColor.Red);
         return null;
     }
 
@@ -445,7 +425,7 @@ static Config? ParseArgs(string[] args)
         return null;
     }
 
-    return new Config(token, appId ?? "", account, graph ? "graph" : "workiq", endpoint, tenant, stream, showToken, verbosity, headers);
+    return new Config(token, appId ?? "", account, endpoint, tenant, stream, showToken, verbosity, headers);
 }
 
 // ── Utilities ────────────────────────────────────────────────────────────
@@ -479,7 +459,7 @@ static string Trunc(string s, int max) => WorkIQ.Rest.Helpers.Trunc(s, max);
 [DllImport("user32.dll", ExactSpelling = true)] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
 static IntPtr ConsoleWindowHandle() { var c = Win32GetConsoleWindow(); var r = GetAncestor(c, 3); return r != IntPtr.Zero ? r : c; }
 
-record Config(string Token, string AppId, string? Account, string Gateway, string? Endpoint, string? Tenant, bool Stream, bool ShowToken, int Verbosity, List<string> Headers);
+record Config(string Token, string AppId, string? Account, string? Endpoint, string? Tenant, bool Stream, bool ShowToken, int Verbosity, List<string> Headers);
 
 // ── Diagnostic handler ──────────────────────────────────────────────────
 

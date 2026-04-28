@@ -4,7 +4,7 @@ A bare-minimum A2A client using only `HttpClient` and `System.Text.Json` — **n
 
 This sample **calls the agent endpoint directly** — no agent card retrieval, no discovery, no capability negotiation. It assumes you already know the agent URL and sends JSON-RPC v0.3 messages to it.
 
-Defaults target the **Work IQ Gateway** (`https://workiq.svc.cloud.microsoft/a2a/`). Use `--endpoint` + `--scope` to target Microsoft Graph or any other A2A endpoint.
+Defaults target the **Work IQ Gateway** (`https://workiq.svc.cloud.microsoft/a2a/`). Use `--endpoint` + `--scope` to target a different A2A endpoint.
 
 > **Protocol version**: This sample uses the **A2A v0.3 JSON-RPC wire format**, which is what the Work IQ server currently supports. The A2A spec has since moved to v1.0 with a REST-style API (different URL paths, no JSON-RPC envelope). This sample will be updated to v1.0 when the server is upgraded.
 
@@ -26,9 +26,9 @@ Use this sample when you want to understand the A2A protocol at the HTTP level, 
    - If you're the tenant admin:
      ```bash
      # Bash
-     ../../scripts/admin-setup.sh --workiq    # or --graph or --both
+     ../../scripts/admin-setup.sh
      # PowerShell
-     ..\..\scripts\admin-setup.ps1 -Gateway WorkIQ
+     ..\..\scripts\admin-setup.ps1
      ```
    - Otherwise, hand [`../../ADMIN_SETUP.md`](../../ADMIN_SETUP.md) to your admin. They'll give you an **App ID** and **Tenant ID**.
 3. **.NET 10 SDK** or later — [download](https://dotnet.microsoft.com/download/dotnet/10.0).
@@ -42,16 +42,6 @@ dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
 ```
 
 Type a message, see a response, type `quit` to exit.
-
-### Against Microsoft Graph
-
-```bash
-dotnet run -- --endpoint https://graph.microsoft.com/rp/workiq/ \
-  --scope https://graph.microsoft.com/.default \
-  --token WAM --appid <APP_ID> --tenant <TENANT_ID>
-```
-
-For Graph, override **both** `--endpoint` (path is different) and `--scope` (audience is Graph, not Work IQ).
 
 ### Streaming mode
 
@@ -130,7 +120,7 @@ curl -H "Authorization: Bearer <token>" {endpoint}/.agents
 ### With a pre-obtained JWT (any platform)
 
 ```bash
-dotnet run -- --endpoint https://graph.microsoft.com/rp/workiq/ --token eyJ0eXAi...
+dotnet run -- --token eyJ0eXAi...
 ```
 
 > **macOS / Linux users:** WAM is only available on Windows. Use `--token <JWT>` with a pre-obtained token instead.
@@ -160,7 +150,7 @@ You > quit
 |------|-------------|
 | `--token, -t` | `WAM` for Windows broker auth, or a pre-obtained JWT string. **Required.** |
 | `--endpoint, -e` | Full agent URL. Default: `https://workiq.svc.cloud.microsoft/a2a/` |
-| `--scope, -s` | Token scope for WAM. Default: `api://workiq.svc.cloud.microsoft/.default`. For Graph use `https://graph.microsoft.com/.default`. |
+| `--scope, -s` | Token scope for WAM. Default: `api://workiq.svc.cloud.microsoft/.default` |
 | `--appid, -a` | Entra app client ID (required with `WAM`) |
 | `--tenant, -T` | Tenant ID or domain. Required with `WAM` for single-tenant apps; defaults to `common` for multi-tenant. |
 | `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
@@ -220,14 +210,14 @@ Text accumulates across events (not incremental deltas). The sample diffs agains
 | `Microsoft.Identity.Client` | MSAL token acquisition |
 | `Microsoft.Identity.Client.Broker` | Windows WAM broker |
 
-That's it — no A2A SDK, no JWT decoder, no Graph SDK.
+That's it — no A2A SDK, no JWT decoder.
 
 ## Sample-specific troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
-| `400 Invalid request, no valid route` | Your `--endpoint` path doesn't match a gateway-registered scope. Use `/a2a/` for Work IQ, `/rp/workiq/` for Graph. |
-| `401 Unauthorized` | Token `aud` doesn't match the endpoint. Work IQ needs `api://workiq.svc.cloud.microsoft/.default`; Graph needs `https://graph.microsoft.com/.default`. |
+| `400 Invalid request, no valid route` | Your `--endpoint` path doesn't match a gateway-registered scope. Use `/a2a/` for the Work IQ Gateway. |
+| `401 Unauthorized` | Token `aud` doesn't match the endpoint. The Work IQ Gateway needs `api://workiq.svc.cloud.microsoft/.default`. |
 | `403 Forbidden` without a scope message | User is missing the Microsoft 365 Copilot license. |
 
 See the [root README](../../README.md#troubleshooting) for the full troubleshooting matrix.

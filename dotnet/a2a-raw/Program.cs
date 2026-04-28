@@ -5,7 +5,7 @@
 // No A2A SDK. Shows exactly what goes over the wire (JSON-RPC v0.3 format).
 //
 // Defaults target the Work IQ Gateway (`https://workiq.svc.cloud.microsoft/a2a/`).
-// Override --endpoint + --scope to target Graph RP or any other A2A endpoint.
+// Override --endpoint + --scope to target any other A2A endpoint.
 //
 // Usage:
 //   dotnet run -- --token <JWT|WAM> --appid <client-id> [--account user@tenant.com] [--stream]
@@ -30,7 +30,7 @@ if (parsed.Error != null)
 }
 
 // Defaults target the Work IQ Gateway (A2A endpoint + matching scope).
-// To target Graph RP instead, override both --endpoint and --scope.
+// Override both --endpoint and --scope to target a different A2A endpoint.
 string endpoint = parsed.Endpoint ?? "https://workiq.svc.cloud.microsoft/a2a/";
 string scope = parsed.Scope ?? "api://workiq.svc.cloud.microsoft/.default";
 string? token = parsed.Token, appId = parsed.AppId, account = parsed.Account, tenant = parsed.Tenant, agentId = parsed.AgentId;
@@ -525,7 +525,7 @@ void PrintUsage()
     Options:
       --endpoint, -e   Agent URL. Defaults to the Work IQ Gateway A2A endpoint:
                        https://workiq.svc.cloud.microsoft/a2a/
-                       Override to target Graph RP or another A2A endpoint.
+                       Override to target a different A2A endpoint.
       --agent-id, -A   Invoke a specific agent. The sample fetches
                        {endpoint}/{agent-id}/.well-known/agent-card.json,
                        reads agentCard.url, and POSTs JSON-RPC there.
@@ -533,7 +533,6 @@ void PrintUsage()
                        --endpoint (default agent for that gateway).
       --scope, -s      Token scope for WAM. Defaults to the Work IQ audience:
                        api://workiq.svc.cloud.microsoft/.default
-                       For Graph RP use: https://graph.microsoft.com/.default
       --appid, -a      App client ID (required with WAM)
       --account        Account hint (e.g., user@contoso.com)
       --tenant, -T     Tenant ID or domain (required with WAM for single-tenant apps;
@@ -549,10 +548,10 @@ void PrintUsage()
       # List agents (discover IDs to use with --agent-id)
       dotnet run -- -t WAM -a <appid> --list-agents
 
-      # Graph RP (override both)
-      dotnet run -- -e https://graph.microsoft.com/rp/workiq/ -s https://graph.microsoft.com/.default -t WAM -a <appid>
+      # Invoke a specific agent
+      dotnet run -- -t WAM -a <appid> --agent-id <AGENT_ID>
 
       # With a pre-obtained JWT
-      dotnet run -- -e https://graph.microsoft.com/rp/workiq/ -t eyJ0eXAi... --stream
+      dotnet run -- -t eyJ0eXAi... --stream
     """);
 }

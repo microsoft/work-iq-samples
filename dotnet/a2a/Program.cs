@@ -1,6 +1,5 @@
-// WorkIQ A2A Sample — Interactive A2A session via Graph RP or WorkIQ Gateway
-// Usage: dotnet run -- --graph --token <JWT|WAM> --appid <clientId> [options]
-//        dotnet run -- --workiq --token <JWT|WAM> --appid <clientId> [options]
+// WorkIQ A2A Sample — Interactive A2A session via the Work IQ Gateway
+// Usage: dotnet run -- --token <JWT|WAM> --appid <clientId> [options]
 
 using System.Diagnostics;
 using System.IdentityModel.Tokens.Jwt;
@@ -366,20 +365,16 @@ static Config? ParseArgs(string[] args)
     }
 
     string? token = a.Token, appId = a.AppId, endpoint = a.Endpoint, account = a.Account, tenant = a.Tenant, agentId = a.AgentId;
-    bool graph = a.Graph, workiq = a.Workiq, showToken = a.ShowToken, stream = a.Stream, listAgents = a.ListAgents;
+    bool showToken = a.ShowToken, stream = a.Stream, listAgents = a.ListAgents;
     int verbosity = a.Verbosity;
     var headers = a.Headers;
 
-    if (string.IsNullOrEmpty(token) || (!graph && !workiq))
+    if (string.IsNullOrEmpty(token))
     {
         Console.WriteLine("""
-            WorkIQ A2A Sample — Interactive A2A agent session
+            WorkIQ A2A Sample — Interactive A2A agent session against the Work IQ Gateway
 
-            Usage: dotnet run -- <gateway> --token <JWT|WAM> --appid <clientId> [options]
-
-            Gateway (exactly one required):
-              --graph          Use Microsoft Graph RP gateway
-              --workiq         Use Work IQ Gateway
+            Usage: dotnet run -- --token <JWT|WAM> --appid <clientId> [options]
 
             Auth:
               --token, -t      Bearer token or 'WAM' for Windows broker auth
@@ -390,13 +385,12 @@ static Config? ParseArgs(string[] args)
 
             Options:
               --endpoint, -e   Override the gateway host (scheme + authority only, no path).
-                               The gateway-specific path (/rp/workiq/ for Graph, /a2a/ for
-                               Work IQ) is preserved automatically.
+                               The /a2a/ path is preserved automatically.
               --agent-id, -A   Invoke a specific agent. The sample fetches the agent card
                                from {gateway}/{agent-id}/.well-known/agent-card.json and
                                uses agentCard.url as the A2A endpoint. Without --agent-id,
-                               the sample posts to the gateway endpoint directly (default
-                               agent for that gateway).
+                               the sample posts to the gateway endpoint directly (the
+                               default BizChat agent).
               --header, -H     Custom HTTP header in 'Key: Value' format (repeatable)
               --show-token     Print the raw JWT token (for reuse with --token)
               --stream         Use streaming mode (SSE via message/stream)
@@ -404,19 +398,12 @@ static Config? ParseArgs(string[] args)
               -v, --verbosity  0 = response only, 1 = default, 2 = full wire
 
             Examples:
-              dotnet run -- --graph --token WAM --appid <your-app-id>
-              dotnet run -- --graph --token WAM --appid <your-app-id> --account user@contoso.com
-              dotnet run -- --graph --token eyJ0eXAi...
-              dotnet run -- --workiq --token WAM --appid <your-app-id>
-              dotnet run -- --workiq --agent-id <AGENT_ID> --token WAM --appid <your-app-id>
-              dotnet run -- --workiq --list-agents --token WAM --appid <your-app-id>
+              dotnet run -- --token WAM --appid <your-app-id> --tenant <your-tenant>
+              dotnet run -- --token WAM --appid <your-app-id> --account user@contoso.com
+              dotnet run -- --token WAM --appid <your-app-id> --agent-id <AGENT_ID>
+              dotnet run -- --token WAM --appid <your-app-id> --list-agents
+              dotnet run -- --token eyJ0eXAi...
             """);
-        return null;
-    }
-
-    if (graph && workiq)
-    {
-        Ink("ERROR: specify --graph or --workiq, not both\n", ConsoleColor.Red);
         return null;
     }
 
@@ -426,10 +413,10 @@ static Config? ParseArgs(string[] args)
         return null;
     }
 
-    var gw = graph ? Gateways.Graph : Gateways.WorkIQ;
+    var gw = Gateways.WorkIQ;
     if (!string.IsNullOrEmpty(endpoint))
     {
-        // --endpoint is host-only (scheme + authority). Preserve the gateway's path.
+        // --endpoint is host-only (scheme + authority). Preserve the /a2a/ path.
         var hostUri = new Uri(endpoint.TrimEnd('/'));
         var presetPath = new Uri(gw.Endpoint).AbsolutePath;
         gw = gw with { Endpoint = $"{hostUri.Scheme}://{hostUri.Authority}{presetPath}" };
@@ -507,13 +494,6 @@ record GatewayConfig(string Name, string Endpoint, string[] Scopes, string Autho
 
 class Gateways
 {
-    public static readonly GatewayConfig Graph = new(
-        Name: "Graph RP",
-        Endpoint: "https://graph.microsoft.com/rp/workiq/",
-        Scopes: ["https://graph.microsoft.com/.default"],
-        Authority: "https://login.microsoftonline.com/common",
-        ExtraHeaders: []);
-
     public static readonly GatewayConfig WorkIQ = new(
         Name: "Work IQ Gateway",
         Endpoint: "https://workiq.svc.cloud.microsoft/a2a/",

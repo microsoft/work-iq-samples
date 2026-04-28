@@ -7,7 +7,7 @@ namespace WorkIQ.Rest;
 
 public record RestArgs(
     string? Token, string? AppId, string? Account, string? Endpoint, string? Tenant,
-    bool Graph, bool Workiq, bool Stream, bool ShowToken,
+    bool Stream, bool ShowToken,
     int Verbosity, List<string> Headers, string? Error);
 
 public static class Helpers
@@ -17,7 +17,7 @@ public static class Helpers
     public static RestArgs ParseArgs(string[] args)
     {
         string? token = null, appId = null, account = null, endpoint = null, tenant = null;
-        bool graph = false, workiq = false, stream = false, showToken = false;
+        bool stream = false, showToken = false;
         int verbosity = 1;
         var headers = new List<string>();
 
@@ -25,8 +25,6 @@ public static class Helpers
         {
             switch (args[i])
             {
-                case "--graph": graph = true; break;
-                case "--workiq": workiq = true; break;
                 case "--token" or "-t":
                     if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
                     token = args[++i]; break;
@@ -55,16 +53,16 @@ public static class Helpers
             }
         }
 
-        return new RestArgs(token, appId, account, endpoint, tenant, graph, workiq, stream, showToken, verbosity, headers, null);
+        return new RestArgs(token, appId, account, endpoint, tenant, stream, showToken, verbosity, headers, null);
 
-        static RestArgs Err(string msg) => new(null, null, null, null, null, false, false, false, false, 1, new List<string>(), msg);
+        static RestArgs Err(string msg) => new(null, null, null, null, null, false, false, 1, new List<string>(), msg);
     }
 
     // ── Chat body builder ───────────────────────────────────────────────
 
     public static string BuildChatBody(string message)
     {
-        // Graph API requires IANA timezone (e.g. "America/Los_Angeles"), not Windows (e.g. "Pacific Standard Time")
+        // The Copilot Chat API requires an IANA timezone (e.g. "America/Los_Angeles"), not Windows (e.g. "Pacific Standard Time")
         string tz;
         try { tz = TimeZoneInfo.Local.HasIanaId ? TimeZoneInfo.Local.Id : TimeZoneInfo.TryConvertWindowsIdToIanaId(TimeZoneInfo.Local.Id, out var iana) ? iana : "UTC"; }
         catch { tz = "UTC"; }
