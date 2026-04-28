@@ -101,15 +101,31 @@ If `--stream` is set but the agent's card has `capabilities.streaming = false`, 
 
 This is the [A2A AgentCard schema](https://a2a-protocol.org/latest/specification/#agent-card). Useful as a porting reference if you're implementing this in another language.
 
-#### How to find an agent ID
+#### How to find an agent ID — `--list-agents`
 
-Agent IDs are stable identifiers exposed by the gateway's agent registry (`{endpoint}/.agents`). For now, get them from product documentation or by querying the registry directly:
+Agent IDs are stable identifiers exposed by the gateway's agent registry (`{endpoint}/.agents`, a Work IQ / Sydney extension — not part of the A2A spec). Pass `--list-agents` to fetch and print the registry, then exit:
+
+```bash
+dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID> --list-agents
+```
+
+The sample does a single `GET {endpoint}/.agents` with the bearer token and prints the `{agentId, name, provider}` rows. Sample output:
+
+```
+Agents at https://workiq.svc.cloud.microsoft/a2a/:
+
+  AGENT ID                  NAME              PROVIDER
+  bizchat-as-gpt-scenario   BizChat           Microsoft
+  researcher-v1             Researcher        Microsoft
+
+5 agents.
+```
+
+Equivalent raw curl:
 
 ```bash
 curl -H "Authorization: Bearer <token>" {endpoint}/.agents
 ```
-
-A list-agents sample is on the roadmap.
 
 ### With a pre-obtained JWT (any platform)
 
@@ -149,6 +165,7 @@ You > quit
 | `--tenant, -T` | Tenant ID or domain. Required with `WAM` for single-tenant apps; defaults to `common` for multi-tenant. |
 | `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
 | `--agent-id, -A` | Invoke a specific agent (fetches `.well-known/agent-card.json` and POSTs to `agentCard.url`) |
+| `--list-agents` | GET `{endpoint}/.agents` and print, then exit (no chat loop). Use to discover agent IDs. |
 | `--stream` | Use streaming mode (`message/stream` via SSE) |
 | `--all-headers` | Print every response header (default: only diagnostic ones) |
 

@@ -9,7 +9,7 @@ namespace WorkIQ.A2ARaw;
 public record RawArgs(
     string? Endpoint, string? Token, string? AppId, string? Account,
     string? Scope, string? Tenant, string? AgentId,
-    bool Stream, bool AllHeaders, string? Error);
+    bool Stream, bool AllHeaders, bool ListAgents, string? Error);
 
 public static class Helpers
 {
@@ -18,7 +18,7 @@ public static class Helpers
     public static RawArgs ParseArgs(string[] args)
     {
         string? endpoint = null, token = null, appId = null, account = null, scope = null, tenant = null, agentId = null;
-        bool stream = false, allHeaders = false;
+        bool stream = false, allHeaders = false, listAgents = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -47,14 +47,15 @@ public static class Helpers
                     agentId = args[++i]; break;
                 case "--stream": stream = true; break;
                 case "--all-headers": allHeaders = true; break;
+                case "--list-agents": listAgents = true; break;
                 default:
                     return Err($"Unknown flag: {args[i]}");
             }
         }
 
-        return new RawArgs(endpoint, token, appId, account, scope, tenant, agentId, stream, allHeaders, null);
+        return new RawArgs(endpoint, token, appId, account, scope, tenant, agentId, stream, allHeaders, listAgents, null);
 
-        static RawArgs Err(string msg) => new(null, null, null, null, null, null, null, false, false, msg);
+        static RawArgs Err(string msg) => new(null, null, null, null, null, null, null, false, false, false, msg);
     }
 
     // ── A2A response text extraction ────────────────────────────────────

@@ -137,4 +137,32 @@ public class ArgParsingTests
         Assert.NotNull(r.Error);
         Assert.Contains("Missing value", r.Error);
     }
+
+    [Fact]
+    public void ListAgents_LongFlag_Sets()
+    {
+        var r = Helpers.ParseArgs(["--workiq", "--token", "t", "--list-agents"]);
+        Assert.Null(r.Error);
+        Assert.True(r.ListAgents);
+    }
+
+    [Fact]
+    public void ListAgents_NotProvided_IsFalse()
+    {
+        var r = Helpers.ParseArgs(["--workiq", "--token", "t"]);
+        Assert.Null(r.Error);
+        Assert.False(r.ListAgents);
+    }
+
+    [Fact]
+    public void ListAgents_CombinesWithOtherFlags()
+    {
+        var r = Helpers.ParseArgs(["--workiq", "--token", "t", "--appid", "x", "--list-agents", "--tenant", "common"]);
+        Assert.Null(r.Error);
+        Assert.True(r.ListAgents);
+        Assert.True(r.Workiq);
+        Assert.Equal("t", r.Token);
+        Assert.Equal("x", r.AppId);
+        Assert.Equal("common", r.Tenant);
+    }
 }

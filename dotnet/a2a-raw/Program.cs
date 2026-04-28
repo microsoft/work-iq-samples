@@ -34,7 +34,7 @@ if (parsed.Error != null)
 string endpoint = parsed.Endpoint ?? "https://workiq.svc.cloud.microsoft/a2a/";
 string scope = parsed.Scope ?? "api://workiq.svc.cloud.microsoft/.default";
 string? token = parsed.Token, appId = parsed.AppId, account = parsed.Account, tenant = parsed.Tenant, agentId = parsed.AgentId;
-bool stream = parsed.Stream, allHeaders = parsed.AllHeaders;
+bool stream = parsed.Stream, allHeaders = parsed.AllHeaders, listAgents = parsed.ListAgents;
 
 if (string.IsNullOrEmpty(token))
 {
@@ -66,6 +66,64 @@ if (token.Equals("WAM", StringComparison.OrdinalIgnoreCase))
 var http = new HttpClient();
 http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+// ── --list-agents: GET {endpoint}/.agents and exit ───────────────────────
+//
+// {endpoint}/.agents is a Work IQ / Sydney extension (not part of the A2A
+// spec) returning an array of {agentId, name, provider} entries. Useful for
+// discovering IDs to pass to --agent-id.
+if (listAgents)
+{
+    var listUri = $"{endpoint.TrimEnd('/')}/.agents";
+    HttpResponseMessage listRes;
+    try { listRes = await http.GetAsync(listUri); }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"ERROR: failed to GET {listUri}: {ex.Message}");
+        return;
+    }
+
+    if (!listRes.IsSuccessStatusCode)
+    {
+        var body = await listRes.Content.ReadAsStringAsync();
+        Console.Error.WriteLine($"ERROR: {(int)listRes.StatusCode} {listRes.ReasonPhrase} from {listUri}");
+        if (!string.IsNullOrWhiteSpace(body)) Console.Error.WriteLine($"  {body.Trim()}");
+        return;
+    }
+
+    var listJson = await listRes.Content.ReadAsStringAsync();
+    using var listDoc = JsonDocument.Parse(listJson);
+    if (listDoc.RootElement.ValueKind != JsonValueKind.Array)
+    {
+        Console.Error.WriteLine($"ERROR: expected JSON array from {listUri}, got {listDoc.RootElement.ValueKind}");
+        return;
+    }
+
+    var rows = listDoc.RootElement.EnumerateArray()
+        .Select(e => (
+            Id: e.TryGetProperty("agentId", out var id) ? id.GetString() ?? "" : "",
+            Name: e.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "",
+            Provider: e.TryGetProperty("provider", out var p) ? p.GetString() ?? "" : ""))
+        .ToList();
+
+    Console.WriteLine();
+    Console.WriteLine($"Agents at {endpoint}:");
+    Console.WriteLine();
+    if (rows.Count == 0)
+    {
+        Console.WriteLine("  (none)");
+        return;
+    }
+
+    int wId = Math.Max(8, rows.Max(r => r.Id.Length));
+    int wName = Math.Max(4, rows.Max(r => r.Name.Length));
+    Console.WriteLine($"  {"AGENT ID".PadRight(wId)}  {"NAME".PadRight(wName)}  PROVIDER");
+    foreach (var r in rows)
+        Console.WriteLine($"  {r.Id.PadRight(wId)}  {r.Name.PadRight(wName)}  {r.Provider}");
+    Console.WriteLine();
+    Console.WriteLine($"{rows.Count} agent{(rows.Count == 1 ? "" : "s")}.");
+    return;
+}
 
 // ── Agent card resolution (when --agent-id is set) ───────────────────────
 //
@@ -467,7 +525,7 @@ void PrintUsage()
     Options:
       --endpoint, -e   Agent URL. Defaults to the Work IQ Gateway A2A endpoint:
                        https://workiq.svc.cloud.microsoft/a2a/
-                       Override to target other rings (e.g., ppe./test.) or Graph RP.
+                       Override to target Graph RP or another A2A endpoint.
       --agent-id, -A   Invoke a specific agent. The sample fetches
                        {endpoint}/{agent-id}/.well-known/agent-card.json,
                        reads agentCard.url, and POSTs JSON-RPC there.
@@ -482,10 +540,14 @@ void PrintUsage()
                        defaults to 'common' for multi-tenant apps)
       --stream         Use streaming mode (SSE via message/stream)
       --all-headers    Print all response headers (default: key diagnostics only)
+      --list-agents    GET {endpoint}/.agents and print, then exit (no chat loop)
 
     Examples:
       # Work IQ Gateway (uses defaults)
       dotnet run -- -t WAM -a <appid>
+
+      # List agents (discover IDs to use with --agent-id)
+      dotnet run -- -t WAM -a <appid> --list-agents
 
       # Graph RP (override both)
       dotnet run -- -e https://graph.microsoft.com/rp/workiq/ -s https://graph.microsoft.com/.default -t WAM -a <appid>

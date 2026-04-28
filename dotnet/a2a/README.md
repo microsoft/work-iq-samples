@@ -70,9 +70,27 @@ dotnet run -- --graph --agent-id <AGENT_ID> --token WAM \
   --appid <APP_ID> --tenant <TENANT_ID>
 ```
 
-#### How to find an agent ID
+#### How to find an agent ID — `--list-agents`
 
-Agent IDs are stable identifiers exposed by the gateway's agent registry. **For now**, you'll get them from product documentation or by listing the registry yourself (a future sample / tool will surface this; out of scope today). A list-agents sample is on the roadmap.
+Pass `--list-agents` to fetch and print the gateway's agent registry. The sample GETs `{endpoint}/.agents` (a Work IQ / Sydney extension, not part of the A2A spec) and prints `{agentId, name, provider}` for each entry, then exits — no chat loop:
+
+```bash
+dotnet run -- --workiq --list-agents --token WAM \
+  --appid <APP_ID> --tenant <TENANT_ID>
+```
+
+Sample output:
+
+```
+Agents at https://workiq.svc.cloud.microsoft/a2a/:
+
+  AGENT ID                  NAME              PROVIDER
+  bizchat-as-gpt-scenario   BizChat           Microsoft
+  researcher-v1             Researcher        Microsoft
+  ...
+
+5 agents.
+```
 
 The Work IQ default agent (BizChat-as-GPT scenario) has id `bizchat-as-gpt-scenario` — but you don't need `--agent-id` to invoke it; not specifying any agent already routes there.
 
@@ -120,6 +138,7 @@ If the `── TOKEN ──` block shows an `aud` that matches the gateway and `
 | `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
 | `--endpoint, -e` | Override the gateway host (scheme + authority only, no path) |
 | `--agent-id, -A` | Invoke a specific agent (fetches `{gateway}/{agent-id}/.well-known/agent-card.json` and posts to `agentCard.url`) |
+| `--list-agents` | GET `{endpoint}/.agents` and print, then exit (no chat loop). Use to discover agent IDs. |
 | `--stream` | Use streaming mode (`message/stream` via SSE) |
 | `--header, -H` | Custom request header (repeatable) |
 | `--show-token` | Print the raw JWT after decoding |
