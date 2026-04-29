@@ -5,7 +5,7 @@
 // No A2A SDK. Shows exactly what goes over the wire (JSON-RPC v0.3 format).
 //
 // Defaults target the Work IQ Gateway (`https://workiq.svc.cloud.microsoft/a2a/`).
-// Override --endpoint + --scope to target Graph RP or any other A2A endpoint.
+// Override --endpoint + --scope to target any other A2A endpoint.
 //
 // Usage:
 //   dotnet run -- --token <JWT|WAM> --appid <client-id> [--account user@tenant.com] [--stream]
@@ -30,11 +30,11 @@ if (parsed.Error != null)
 }
 
 // Defaults target the Work IQ Gateway (A2A endpoint + matching scope).
-// To target Graph RP instead, override both --endpoint and --scope.
+// Override both --endpoint and --scope to target a different A2A endpoint.
 string endpoint = parsed.Endpoint ?? "https://workiq.svc.cloud.microsoft/a2a/";
 string scope = parsed.Scope ?? "api://workiq.svc.cloud.microsoft/.default";
-string? token = parsed.Token, appId = parsed.AppId, account = parsed.Account, tenant = parsed.Tenant;
-bool stream = parsed.Stream, allHeaders = parsed.AllHeaders;
+string? token = parsed.Token, appId = parsed.AppId, account = parsed.Account, tenant = parsed.Tenant, agentId = parsed.AgentId;
+bool stream = parsed.Stream, allHeaders = parsed.AllHeaders, listAgents = parsed.ListAgents;
 
 if (string.IsNullOrEmpty(token))
 {
@@ -66,6 +66,117 @@ if (token.Equals("WAM", StringComparison.OrdinalIgnoreCase))
 var http = new HttpClient();
 http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+// ── --list-agents: GET {endpoint}/.agents and exit ───────────────────────
+//
+// {endpoint}/.agents is a Work IQ / Sydney extension (not part of the A2A
+// spec) returning an array of {agentId, name, provider} entries. Useful for
+// discovering IDs to pass to --agent-id.
+if (listAgents)
+{
+    var listUri = $"{endpoint.TrimEnd('/')}/.agents";
+    HttpResponseMessage listRes;
+    try { listRes = await http.GetAsync(listUri); }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"ERROR: failed to GET {listUri}: {ex.Message}");
+        return;
+    }
+
+    if (!listRes.IsSuccessStatusCode)
+    {
+        var body = await listRes.Content.ReadAsStringAsync();
+        Console.Error.WriteLine($"ERROR: {(int)listRes.StatusCode} {listRes.ReasonPhrase} from {listUri}");
+        if (!string.IsNullOrWhiteSpace(body)) Console.Error.WriteLine($"  {body.Trim()}");
+        return;
+    }
+
+    var listJson = await listRes.Content.ReadAsStringAsync();
+    using var listDoc = JsonDocument.Parse(listJson);
+    if (listDoc.RootElement.ValueKind != JsonValueKind.Array)
+    {
+        Console.Error.WriteLine($"ERROR: expected JSON array from {listUri}, got {listDoc.RootElement.ValueKind}");
+        return;
+    }
+
+    var rows = listDoc.RootElement.EnumerateArray()
+        .Select(e => (
+            Id: e.TryGetProperty("agentId", out var id) ? id.GetString() ?? "" : "",
+            Name: e.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "",
+            Provider: e.TryGetProperty("provider", out var p) ? p.GetString() ?? "" : ""))
+        .ToList();
+
+    Console.WriteLine();
+    Console.WriteLine($"Agents at {endpoint}:");
+    Console.WriteLine();
+    if (rows.Count == 0)
+    {
+        Console.WriteLine("  (none)");
+        return;
+    }
+
+    int wId = Math.Max(8, rows.Max(r => r.Id.Length));
+    int wName = Math.Max(4, rows.Max(r => r.Name.Length));
+    Console.WriteLine($"  {"AGENT ID".PadRight(wId)}  {"NAME".PadRight(wName)}  PROVIDER");
+    foreach (var r in rows)
+        Console.WriteLine($"  {r.Id.PadRight(wId)}  {r.Name.PadRight(wName)}  {r.Provider}");
+    Console.WriteLine();
+    Console.WriteLine($"{rows.Count} agent{(rows.Count == 1 ? "" : "s")}.");
+    return;
+}
+
+// ── Agent card resolution (when --agent-id is set) ───────────────────────
+//
+// This sample deliberately does the agent-card fetch in raw HTTP + JSON to
+// show what the wire interaction looks like. With --agent-id the sample:
+//   1. GET {endpoint}/{agentId}/.well-known/agent-card.json
+//   2. Parse the JSON to find:   url, name, capabilities.streaming
+//   3. Replace the POST target with agentCard.url
+//
+// Without --agent-id the sample posts directly to the gateway endpoint
+// (i.e., the default agent for that gateway).
+if (!string.IsNullOrEmpty(agentId))
+{
+    var cardUri = $"{endpoint.TrimEnd('/')}/{agentId}/.well-known/agent-card.json";
+    try
+    {
+        var cardRes = await http.GetAsync(cardUri);
+        if (!cardRes.IsSuccessStatusCode)
+        {
+            Console.Error.WriteLine($"ERROR: failed to fetch agent card: {(int)cardRes.StatusCode} {cardRes.StatusCode} from {cardUri}");
+            return;
+        }
+
+        var cardJson = await cardRes.Content.ReadAsStringAsync();
+        using var cardDoc = JsonDocument.Parse(cardJson);
+        var root = cardDoc.RootElement;
+
+        var resolvedUrl = root.GetProperty("url").GetString()
+            ?? throw new InvalidOperationException("agent-card.json has no 'url' field");
+        var resolvedName = root.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+        var streamingSupported = root.TryGetProperty("capabilities", out var caps)
+            && caps.TryGetProperty("streaming", out var s) && s.GetBoolean();
+
+        Console.WriteLine($"Agent card:");
+        Console.WriteLine($"  id              {agentId}");
+        Console.WriteLine($"  name            {resolvedName}");
+        Console.WriteLine($"  url             {resolvedUrl}");
+        Console.WriteLine($"  streaming       {streamingSupported}");
+
+        if (stream && !streamingSupported)
+        {
+            Console.WriteLine("  note: agent does not advertise streaming; falling back to sync");
+            stream = false;
+        }
+
+        endpoint = resolvedUrl;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"ERROR: failed to resolve agent '{agentId}': {ex.Message}");
+        return;
+    }
+}
 
 string? contextId = null;
 
@@ -414,28 +525,33 @@ void PrintUsage()
     Options:
       --endpoint, -e   Agent URL. Defaults to the Work IQ Gateway A2A endpoint:
                        https://workiq.svc.cloud.microsoft/a2a/
-                       Override to target other rings (e.g., ppe./test.) or Graph RP.
+                       Override to target a different A2A endpoint.
+      --agent-id, -A   Invoke a specific agent. The sample fetches
+                       {endpoint}/{agent-id}/.well-known/agent-card.json,
+                       reads agentCard.url, and POSTs JSON-RPC there.
+                       Without --agent-id, the sample posts directly to
+                       --endpoint (default agent for that gateway).
       --scope, -s      Token scope for WAM. Defaults to the Work IQ audience:
                        api://workiq.svc.cloud.microsoft/.default
-                       For Graph RP use: https://graph.microsoft.com/.default
       --appid, -a      App client ID (required with WAM)
       --account        Account hint (e.g., user@contoso.com)
       --tenant, -T     Tenant ID or domain (required with WAM for single-tenant apps;
                        defaults to 'common' for multi-tenant apps)
       --stream         Use streaming mode (SSE via message/stream)
       --all-headers    Print all response headers (default: key diagnostics only)
+      --list-agents    GET {endpoint}/.agents and print, then exit (no chat loop)
 
     Examples:
       # Work IQ Gateway (uses defaults)
       dotnet run -- -t WAM -a <appid>
 
-      # Work IQ PPE ring (PFT path)
-      dotnet run -- -e https://ppe.workiq.svc.cloud.dev.microsoft/a2a/ -t WAM -a <appid>
+      # List agents (discover IDs to use with --agent-id)
+      dotnet run -- -t WAM -a <appid> --list-agents
 
-      # Graph RP (override both)
-      dotnet run -- -e https://graph.microsoft.com/rp/workiq/ -s https://graph.microsoft.com/.default -t WAM -a <appid>
+      # Invoke a specific agent
+      dotnet run -- -t WAM -a <appid> --agent-id <AGENT_ID>
 
       # With a pre-obtained JWT
-      dotnet run -- -e https://graph.microsoft.com/rp/workiq/ -t eyJ0eXAi... --stream
+      dotnet run -- -t eyJ0eXAi... --stream
     """);
 }

@@ -15,45 +15,25 @@ public class ArgParsingTests
     [Fact]
     public void ValidArgs_ProduceCorrectConfig()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token", "mytoken", "--appid", "app1", "--stream"]);
+        var r = Helpers.ParseArgs(["--token", "mytoken", "--appid", "app1", "--stream"]);
         Assert.Null(r.Error);
         Assert.Equal("mytoken", r.Token);
         Assert.Equal("app1", r.AppId);
         Assert.True(r.Stream);
-        Assert.True(r.Graph);
     }
 
     [Fact]
     public void MissingToken_ReturnsNullToken()
     {
-        var r = Helpers.ParseArgs(["--graph"]);
+        var r = Helpers.ParseArgs([]);
         Assert.Null(r.Error);
         Assert.Null(r.Token);
     }
 
     [Fact]
-    public void MissingGateway_NoGatewayFlagSet()
-    {
-        var r = Helpers.ParseArgs(["--token", "abc"]);
-        Assert.Null(r.Error);
-        Assert.False(r.Graph);
-        Assert.False(r.Workiq);
-    }
-
-    [Fact]
-    public void GraphAndWorkiqTogether_BothFlagsSet()
-    {
-        // Mutual-exclusion is enforced at the Program.cs layer, not here.
-        var r = Helpers.ParseArgs(["--graph", "--workiq", "--token", "abc"]);
-        Assert.Null(r.Error);
-        Assert.True(r.Graph);
-        Assert.True(r.Workiq);
-    }
-
-    [Fact]
     public void EndpointOverride_Captured()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--endpoint", "https://custom.com/"]);
+        var r = Helpers.ParseArgs(["--token", "t", "--endpoint", "https://custom.com/"]);
         Assert.Null(r.Error);
         Assert.Equal("https://custom.com/", r.Endpoint);
     }
@@ -61,7 +41,7 @@ public class ArgParsingTests
     [Fact]
     public void HeaderValues_AreCollected()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--header", "X-Custom: v1", "-H", "X-Other: v2"]);
+        var r = Helpers.ParseArgs(["--token", "t", "--header", "X-Custom: v1", "-H", "X-Other: v2"]);
         Assert.Null(r.Error);
         Assert.Equal(2, r.Headers.Count);
     }
@@ -69,7 +49,7 @@ public class ArgParsingTests
     [Fact]
     public void VerbosityWithNonInteger_ReturnsError()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--verbosity", "abc"]);
+        var r = Helpers.ParseArgs(["--token", "t", "--verbosity", "abc"]);
         Assert.NotNull(r.Error);
         Assert.Contains("integer", r.Error);
     }
@@ -77,7 +57,7 @@ public class ArgParsingTests
     [Fact]
     public void VerbosityWithInteger_Parsed()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--verbosity", "3"]);
+        var r = Helpers.ParseArgs(["--token", "t", "--verbosity", "3"]);
         Assert.Null(r.Error);
         Assert.Equal(3, r.Verbosity);
     }
@@ -85,7 +65,7 @@ public class ArgParsingTests
     [Fact]
     public void MissingValueAfterToken_ReturnsError()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token"]);
+        var r = Helpers.ParseArgs(["--token"]);
         Assert.NotNull(r.Error);
         Assert.Contains("Missing value", r.Error);
     }
@@ -93,7 +73,7 @@ public class ArgParsingTests
     [Fact]
     public void MissingValueAfterEndpoint_ReturnsError()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--endpoint"]);
+        var r = Helpers.ParseArgs(["--token", "t", "--endpoint"]);
         Assert.NotNull(r.Error);
         Assert.Contains("Missing value", r.Error);
     }
@@ -101,8 +81,67 @@ public class ArgParsingTests
     [Fact]
     public void DefaultVerbosity_IsOne()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token", "t"]);
+        var r = Helpers.ParseArgs(["--token", "t"]);
         Assert.Null(r.Error);
         Assert.Equal(1, r.Verbosity);
+    }
+
+    [Fact]
+    public void AgentId_LongFlag_Captured()
+    {
+        var r = Helpers.ParseArgs(["--token", "t", "--agent-id", "researcher-v2"]);
+        Assert.Null(r.Error);
+        Assert.Equal("researcher-v2", r.AgentId);
+    }
+
+    [Fact]
+    public void AgentId_ShortFlag_Captured()
+    {
+        var r = Helpers.ParseArgs(["--token", "t", "-A", "researcher-v2"]);
+        Assert.Null(r.Error);
+        Assert.Equal("researcher-v2", r.AgentId);
+    }
+
+    [Fact]
+    public void AgentId_NotProvided_IsNull()
+    {
+        var r = Helpers.ParseArgs(["--token", "t"]);
+        Assert.Null(r.Error);
+        Assert.Null(r.AgentId);
+    }
+
+    [Fact]
+    public void AgentId_MissingValue_ReturnsError()
+    {
+        var r = Helpers.ParseArgs(["--token", "t", "--agent-id"]);
+        Assert.NotNull(r.Error);
+        Assert.Contains("Missing value", r.Error);
+    }
+
+    [Fact]
+    public void ListAgents_LongFlag_Sets()
+    {
+        var r = Helpers.ParseArgs(["--token", "t", "--list-agents"]);
+        Assert.Null(r.Error);
+        Assert.True(r.ListAgents);
+    }
+
+    [Fact]
+    public void ListAgents_NotProvided_IsFalse()
+    {
+        var r = Helpers.ParseArgs(["--token", "t"]);
+        Assert.Null(r.Error);
+        Assert.False(r.ListAgents);
+    }
+
+    [Fact]
+    public void ListAgents_CombinesWithOtherFlags()
+    {
+        var r = Helpers.ParseArgs(["--token", "t", "--appid", "x", "--list-agents", "--tenant", "common"]);
+        Assert.Null(r.Error);
+        Assert.True(r.ListAgents);
+        Assert.Equal("t", r.Token);
+        Assert.Equal("x", r.AppId);
+        Assert.Equal("common", r.Tenant);
     }
 }

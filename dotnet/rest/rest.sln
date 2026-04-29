@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "workiq-rest-sample", "workiq-rest-sample.csproj", "{638D0555-FA16-E236-6E50-7C38D5AD0FFD}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{638D0555-FA16-E236-6E50-7C38D5AD0FFD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{638D0555-FA16-E236-6E50-7C38D5AD0FFD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{638D0555-FA16-E236-6E50-7C38D5AD0FFD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{638D0555-FA16-E236-6E50-7C38D5AD0FFD}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {867C2818-3E00-4226-BAEE-9B5EE72B3DF6}
+	EndGlobalSection
+EndGlobal

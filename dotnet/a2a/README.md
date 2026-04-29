@@ -2,7 +2,7 @@
 
 A minimal, single-file interactive client for communicating with Work IQ agents using the [Agent-to-Agent (A2A) protocol](https://a2a-protocol.org).
 
-Uses the [A2A .NET SDK](https://github.com/a2aproject/a2a-dotnet) (NuGet: [`A2A`](https://www.nuget.org/packages/A2A/)) for JSON-RPC transport. Supports both synchronous (`message/send`) and streaming (`message/stream`) modes, against either the **Work IQ Gateway** or **Microsoft Graph**.
+Uses the [A2A .NET SDK](https://github.com/a2aproject/a2a-dotnet) (NuGet: [`A2A`](https://www.nuget.org/packages/A2A/)) for JSON-RPC transport. Supports both synchronous (`message/send`) and streaming (`message/stream`) modes against the **Work IQ Gateway**.
 
 For the lower-level sample with no SDK (raw HTTP + JSON), see [`../a2a-raw/`](../a2a-raw/).
 
@@ -20,46 +20,71 @@ The **Agent-to-Agent (A2A) Protocol** is an open standard for communication betw
    - If you're the tenant admin:
      ```bash
      # Bash
-     ../../scripts/admin-setup.sh --workiq    # or --graph or --both
+     ../../scripts/admin-setup.sh
      # PowerShell
-     ..\..\scripts\admin-setup.ps1 -Gateway WorkIQ
+     ..\..\scripts\admin-setup.ps1
      ```
    - Otherwise, hand [`../../ADMIN_SETUP.md`](../../ADMIN_SETUP.md) to your admin. They'll give you an **App ID** and **Tenant ID**.
 3. **.NET 10 SDK** or later — [download](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ## Quick start
 
-### Against the Work IQ Gateway (default host `workiq.svc.cloud.microsoft`)
+### Default — talk to the Work IQ Gateway's BizChat agent
 
 ```bash
-dotnet run -- --workiq --token WAM --appid <APP_ID> --tenant <TENANT_ID>
+dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
 ```
 
 Type a message, see a response, type `quit` to exit.
-
-### Against the Work IQ Gateway, a specific ring (e.g., `ppe.`)
-
-```bash
-dotnet run -- --workiq --endpoint https://ppe.workiq.svc.cloud.dev.microsoft \
-  --token WAM --appid <APP_ID> --tenant <TENANT_ID>
-```
-
-`--endpoint` takes **host-only** (scheme + authority). The sample preserves the gateway's path (`/a2a/`).
-
-### Against Microsoft Graph
-
-```bash
-dotnet run -- --graph --token WAM --appid <APP_ID> --tenant <TENANT_ID>
-```
 
 ### Streaming mode
 
 Add `--stream` to switch from `message/send` (sync) to `message/stream` (SSE).
 
+### Invoking a specific agent (`--agent-id`)
+
+Without `--agent-id`, the sample posts directly to the gateway endpoint (the default BizChat agent). To invoke a specific agent, pass `--agent-id <id>`:
+
+```bash
+dotnet run -- --token WAM --agent-id <AGENT_ID> \
+  --appid <APP_ID> --tenant <TENANT_ID>
+```
+
+The sample then:
+
+1. Fetches the agent card from `{gateway}/{agent-id}/.well-known/agent-card.json` via the A2A SDK's `A2ACardResolver`.
+2. Reads `agentCard.url`, `agentCard.name`, `agentCard.capabilities.streaming` from the response.
+3. Uses `agentCard.url` (not the gateway endpoint) as the target for `A2AClient`.
+4. Falls back to sync mode if `--stream` is set but the agent doesn't advertise streaming (a note prints at `-v >= 1`).
+
+#### How to find an agent ID — `--list-agents`
+
+Pass `--list-agents` to fetch and print the gateway's agent registry. The sample GETs `{endpoint}/.agents` (a Work IQ / Sydney extension, not part of the A2A spec) and prints `{agentId, name, provider}` for each entry, then exits — no chat loop:
+
+```bash
+dotnet run -- --token WAM --list-agents \
+  --appid <APP_ID> --tenant <TENANT_ID>
+```
+
+Sample output:
+
+```
+Agents at https://workiq.svc.cloud.microsoft/a2a/:
+
+  AGENT ID                  NAME              PROVIDER
+  bizchat-as-gpt-scenario   BizChat           Microsoft
+  researcher-v1             Researcher        Microsoft
+  ...
+
+5 agents.
+```
+
+The Work IQ default agent (BizChat-as-GPT scenario) has id `bizchat-as-gpt-scenario` — but you don't need `--agent-id` to invoke it; not specifying any agent already routes there.
+
 ### With a pre-obtained JWT (any platform)
 
 ```bash
-dotnet run -- --graph --token eyJ0eXAi...
+dotnet run -- --token eyJ0eXAi...
 ```
 
 > **macOS / Linux users:** WAM is only available on Windows. Use `--token <JWT>` with a pre-obtained token instead.
@@ -87,18 +112,19 @@ Agent > You've exchanged 8 emails with Alice this week. Key threads:
 You > quit
 ```
 
-If the `── TOKEN ──` block shows an `aud` that matches the gateway and `scp` includes `WorkIQAgent.Ask` (or the 7 Graph scopes), auth is working.
+If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and `scp` includes `WorkIQAgent.Ask`, auth is working.
 
 ## Flags
 
 | Flag | Description |
 |------|-------------|
-| `--graph` / `--workiq` | Gateway selection. Exactly one required. |
 | `--token, -t` | `WAM` for Windows broker auth, or a pre-obtained JWT string |
 | `--appid, -a` | Entra app client ID (required with `WAM`) |
 | `--tenant, -T` | Tenant ID or domain. Required with `WAM` for single-tenant apps; defaults to `common` for multi-tenant. |
 | `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
 | `--endpoint, -e` | Override the gateway host (scheme + authority only, no path) |
+| `--agent-id, -A` | Invoke a specific agent (fetches `{gateway}/{agent-id}/.well-known/agent-card.json` and posts to `agentCard.url`) |
+| `--list-agents` | GET `{endpoint}/.agents` and print, then exit (no chat loop). Use to discover agent IDs. |
 | `--stream` | Use streaming mode (`message/stream` via SSE) |
 | `--header, -H` | Custom request header (repeatable) |
 | `--show-token` | Print the raw JWT after decoding |
@@ -108,10 +134,10 @@ If the `── TOKEN ──` block shows an `aud` that matches the gateway and `
 
 ```
 ┌──────────────┐   JSON-RPC POST    ┌──────────────────┐
-│  This Sample │ ────────────────>  │  Gateway / Agent │
-│  (A2A Client)│ <────────────────  │  (Work IQ or     │
-└──────────────┘   AgentMessage     │   Graph RP)      │
-                  or AgentTask      └──────────────────┘
+│  This Sample │ ────────────────>  │  Work IQ Gateway │
+│  (A2A Client)│ <────────────────  │  / Agent         │
+└──────────────┘   AgentMessage     └──────────────────┘
+                  or AgentTask
 ```
 
 1. **Auth**: acquires a token via WAM or accepts a pre-obtained JWT.
@@ -180,7 +206,7 @@ if (agentMessage.Metadata?.TryGetValue("attributions", out var attrs) == true
 Use `-v 2` to see full HTTP request/response details:
 
 ```
-  > POST https://graph.microsoft.com/rp/workiq/
+  > POST https://workiq.svc.cloud.microsoft/a2a/
     Authorization: Bearer ...(3089c)
     Content-Type: application/json
     Body: {"jsonrpc":"2.0","method":"message/send","params":{...}}

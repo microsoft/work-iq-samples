@@ -4,14 +4,11 @@
 
 .DESCRIPTION
   Creates a public-client Entra app registration with the permissions the
-  .NET samples need. Idempotent: re-running against an existing app name
-  updates it (after confirmation) instead of creating a duplicate.
+  .NET samples need (Work IQ Gateway). Idempotent: re-running against an
+  existing app name updates it (after confirmation) instead of creating
+  a duplicate.
 
   Requires: Azure CLI, logged in as tenant admin (az login).
-
-.PARAMETER Gateway
-  Which gateway's permissions to configure: WorkIQ, Graph, or Both.
-  Default: WorkIQ.
 
 .PARAMETER Name
   Display name for the app registration. Default: "Work IQ Samples Client".
@@ -30,10 +27,10 @@
   Echo each az command before running it.
 
 .EXAMPLE
-  .\admin-setup.ps1 -Gateway WorkIQ
+  .\admin-setup.ps1
 
 .EXAMPLE
-  .\admin-setup.ps1 -Gateway Both -Name "My Samples App" -MultiTenant
+  .\admin-setup.ps1 -Name "My Samples App" -MultiTenant
 
 .NOTES
   For the Swift iOS sample, use swift/a2a/setup-app-registration.ps1
@@ -42,9 +39,6 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('WorkIQ', 'Graph', 'Both')]
-    [string]$Gateway = 'WorkIQ',
-
     [string]$Name = 'Work IQ Samples Client',
 
     [string]$Tenant = '',
@@ -59,20 +53,8 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # ── Well-known IDs ──────────────────────────────────────────────────────
-$GraphAppId = '00000003-0000-0000-c000-000000000000'
 $WorkIqAppId = 'fdcc1f02-fc51-4226-8753-f668596af7f7'
 $WorkIqAgentAskScopeId = '0b1715fd-f4bf-4c63-b16d-5be31f9847c2'
-
-# Graph delegated-permission GUIDs (required for the Copilot Chat API)
-$GraphScopes = @(
-    '205e70e5-aba6-4c52-a976-6d2d46c48043'  # Sites.Read.All
-    '570282fd-fa5c-430d-a7fd-fc8dc98a9dca'  # Mail.Read
-    'b89f9189-71a5-4e70-b041-9887f0bc7e4a'  # People.Read.All
-    '30b87d18-ebb1-45db-97f8-82ccb1f0190c'  # OnlineMeetingTranscript.Read.All
-    'f501c180-9344-439a-bca0-6cbf209fd270'  # Chat.Read
-    '767156cb-16ae-4d10-8f8b-41b657c8c8c8'  # ChannelMessage.Read.All
-    '922f9392-b1b7-483c-a4be-0089be7704fb'  # ExternalItem.Read.All
-)
 
 $signInAudience = if ($MultiTenant) { 'AzureADMultipleOrgs' } else { 'AzureADMyOrg' }
 
@@ -115,21 +97,18 @@ Write-Host 'Work IQ Samples — Admin Setup'
 Write-Host "  Tenant:           $Tenant"
 Write-Host "  Signed in as:     $currentUser"
 Write-Host "  App name:         $Name"
-Write-Host "  Gateway:          $Gateway"
 Write-Host "  Sign-in audience: $signInAudience"
 if ($DryRun) { Write-Host '  [DRY RUN — no changes will be made]' -ForegroundColor Yellow }
 Write-Host ''
 
 # ── Step 1: Work IQ SP JIT-provisioning ─────────────────────────────────
-if ($Gateway -in 'WorkIQ', 'Both') {
-    Write-Host '[1/6] Ensuring Work IQ service principal exists in tenant...'
-    try {
-        Invoke-Step @('az', 'ad', 'sp', 'create', '--id', $WorkIqAppId) | Out-Null
-    } catch {
-        # Harmless if the SP already exists
-    }
-    Write-Host '      OK'
+Write-Host '[1/6] Ensuring Work IQ service principal exists in tenant...'
+try {
+    Invoke-Step @('az', 'ad', 'sp', 'create', '--id', $WorkIqAppId) | Out-Null
+} catch {
+    # Harmless if the SP already exists
 }
+Write-Host '      OK'
 
 # ── Step 2: Create or reuse app registration ────────────────────────────
 Write-Host '[2/6] Creating app registration...'
@@ -171,23 +150,13 @@ Invoke-Step @('az', 'ad', 'app', 'update',
 Write-Host '      OK'
 
 # ── Step 5: Delegated permissions ───────────────────────────────────────
-Write-Host "[5/6] Adding delegated permissions ($Gateway)..."
-if ($Gateway -in 'Graph', 'Both') {
-    $graphArgs = @('az', 'ad', 'app', 'permission', 'add', '--id', $appId, '--api', $GraphAppId, '--api-permissions')
-    foreach ($id in $GraphScopes) { $graphArgs += "$id=Scope" }
-    try { Invoke-Step $graphArgs | Out-Null } catch { }
-    Write-Host '      Graph: Sites.Read.All, Mail.Read, People.Read.All,'
-    Write-Host '             OnlineMeetingTranscript.Read.All, Chat.Read,'
-    Write-Host '             ChannelMessage.Read.All, ExternalItem.Read.All'
-}
-if ($Gateway -in 'WorkIQ', 'Both') {
-    try {
-        Invoke-Step @('az', 'ad', 'app', 'permission', 'add',
-            '--id', $appId, '--api', $WorkIqAppId,
-            '--api-permissions', "$WorkIqAgentAskScopeId=Scope") | Out-Null
-    } catch { }
-    Write-Host '      Work IQ: WorkIQAgent.Ask'
-}
+Write-Host '[5/6] Adding delegated permissions...'
+try {
+    Invoke-Step @('az', 'ad', 'app', 'permission', 'add',
+        '--id', $appId, '--api', $WorkIqAppId,
+        '--api-permissions', "$WorkIqAgentAskScopeId=Scope") | Out-Null
+} catch { }
+Write-Host '      Work IQ: WorkIQAgent.Ask'
 
 # ── Step 6: Admin consent (direct Microsoft Graph API, idempotent) ─────
 # We deliberately do NOT use 'az ad app permission admin-consent' — it uses
@@ -246,17 +215,9 @@ function Set-Grant {
 
 Write-Host '[6/6] Granting admin consent (direct Graph API)...'
 $appSpId = Resolve-SpId -AppId $appId
-if ($Gateway -in 'Graph', 'Both') {
-    $graphSpId = Resolve-SpId -AppId $GraphAppId
-    Set-Grant -ClientSpId $appSpId -ResourceSpId $graphSpId `
-        -Scopes 'Sites.Read.All Mail.Read People.Read.All OnlineMeetingTranscript.Read.All Chat.Read ChannelMessage.Read.All ExternalItem.Read.All'
-    Write-Host '      Graph: consent granted'
-}
-if ($Gateway -in 'WorkIQ', 'Both') {
-    $workIqSpId = Resolve-SpId -AppId $WorkIqAppId
-    Set-Grant -ClientSpId $appSpId -ResourceSpId $workIqSpId -Scopes 'WorkIQAgent.Ask'
-    Write-Host '      Work IQ: consent granted'
-}
+$workIqSpId = Resolve-SpId -AppId $WorkIqAppId
+Set-Grant -ClientSpId $appSpId -ResourceSpId $workIqSpId -Scopes 'WorkIQAgent.Ask'
+Write-Host '      Work IQ: consent granted'
 
 # ── Summary ─────────────────────────────────────────────────────────────
 Write-Host ''
@@ -267,17 +228,10 @@ Write-Host "  APP_ID:    $appId"
 Write-Host "  TENANT_ID: $Tenant"
 Write-Host ''
 Write-Host 'Test commands:'
-if ($Gateway -in 'WorkIQ', 'Both') {
-    Write-Host '  # WorkIQ REST (Copilot Chat via WorkIQ Gateway):'
-    Write-Host "  cd dotnet/rest; dotnet run -- --workiq --token WAM ``"
-    Write-Host "      --appid $appId --tenant $Tenant"
-    Write-Host ''
-    Write-Host '  # WorkIQ A2A:'
-    Write-Host "  cd dotnet/a2a; dotnet run -- --workiq --token WAM ``"
-    Write-Host "      --appid $appId --tenant $Tenant"
-}
-if ($Gateway -in 'Graph', 'Both') {
-    Write-Host '  # Graph RP (Copilot Chat via Microsoft Graph):'
-    Write-Host "  cd dotnet/rest; dotnet run -- --graph --token WAM ``"
-    Write-Host "      --appid $appId --tenant $Tenant"
-}
+Write-Host '  # Work IQ REST (Copilot Chat via Work IQ Gateway):'
+Write-Host "  cd dotnet/rest; dotnet run -- --token WAM ``"
+Write-Host "      --appid $appId --tenant $Tenant"
+Write-Host ''
+Write-Host '  # Work IQ A2A:'
+Write-Host "  cd dotnet/a2a; dotnet run -- --token WAM ``"
+Write-Host "      --appid $appId --tenant $Tenant"

@@ -15,47 +15,26 @@ public class ArgParsingTests
     [Fact]
     public void ValidArgs_ProduceCorrectConfig()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token", "mytoken", "--appid", "app1", "--stream", "--account", "user@test.com"]);
+        var r = Helpers.ParseArgs(["--token", "mytoken", "--appid", "app1", "--stream", "--account", "user@test.com"]);
         Assert.Null(r.Error);
         Assert.Equal("mytoken", r.Token);
         Assert.Equal("app1", r.AppId);
         Assert.Equal("user@test.com", r.Account);
         Assert.True(r.Stream);
-        Assert.True(r.Graph);
-    }
-
-    [Fact]
-    public void GraphAndWorkiqTogether_BothFlagsSet()
-    {
-        // The Helpers.ParseArgs layer just extracts flags — mutual-exclusion is
-        // enforced at the Program.cs Config-construction layer.
-        var r = Helpers.ParseArgs(["--graph", "--workiq", "--token", "abc"]);
-        Assert.Null(r.Error);
-        Assert.True(r.Graph);
-        Assert.True(r.Workiq);
     }
 
     [Fact]
     public void MissingToken_ReturnsNullToken()
     {
-        var r = Helpers.ParseArgs(["--graph"]);
+        var r = Helpers.ParseArgs([]);
         Assert.Null(r.Error);
         Assert.Null(r.Token);
     }
 
     [Fact]
-    public void MissingGateway_NoGatewayFlagSet()
-    {
-        var r = Helpers.ParseArgs(["--token", "abc"]);
-        Assert.Null(r.Error);
-        Assert.False(r.Graph);
-        Assert.False(r.Workiq);
-    }
-
-    [Fact]
     public void VerbosityWithNonInteger_ReturnsError()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--verbosity", "abc"]);
+        var r = Helpers.ParseArgs(["--token", "t", "--verbosity", "abc"]);
         Assert.NotNull(r.Error);
         Assert.Contains("integer", r.Error);
     }
@@ -63,7 +42,7 @@ public class ArgParsingTests
     [Fact]
     public void VerbosityWithInteger_Parsed()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--verbosity", "2"]);
+        var r = Helpers.ParseArgs(["--token", "t", "--verbosity", "2"]);
         Assert.Null(r.Error);
         Assert.Equal(2, r.Verbosity);
     }
@@ -71,7 +50,7 @@ public class ArgParsingTests
     [Fact]
     public void HeaderValues_AreCollected()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--header", "X-Custom: value1", "-H", "X-Other: value2"]);
+        var r = Helpers.ParseArgs(["--token", "t", "--header", "X-Custom: value1", "-H", "X-Other: value2"]);
         Assert.Null(r.Error);
         Assert.Equal(2, r.Headers.Count);
         Assert.Equal("X-Custom: value1", r.Headers[0]);
@@ -81,7 +60,7 @@ public class ArgParsingTests
     [Fact]
     public void ShowToken_Parsed()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--show-token"]);
+        var r = Helpers.ParseArgs(["--token", "t", "--show-token"]);
         Assert.Null(r.Error);
         Assert.True(r.ShowToken);
     }
@@ -89,7 +68,7 @@ public class ArgParsingTests
     [Fact]
     public void DefaultVerbosity_IsOne()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token", "t"]);
+        var r = Helpers.ParseArgs(["--token", "t"]);
         Assert.Null(r.Error);
         Assert.Equal(1, r.Verbosity);
     }
@@ -97,7 +76,7 @@ public class ArgParsingTests
     [Fact]
     public void MissingValueAfterToken_ReturnsError()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token"]);
+        var r = Helpers.ParseArgs(["--token"]);
         Assert.NotNull(r.Error);
         Assert.Contains("Missing value", r.Error);
     }
@@ -105,7 +84,7 @@ public class ArgParsingTests
     [Fact]
     public void MissingValueAfterHeader_ReturnsError()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--header"]);
+        var r = Helpers.ParseArgs(["--token", "t", "--header"]);
         Assert.NotNull(r.Error);
         Assert.Contains("Missing value", r.Error);
     }
@@ -113,24 +92,24 @@ public class ArgParsingTests
     [Fact]
     public void MissingValueAfterVerbosity_ReturnsError()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--verbosity"]);
+        var r = Helpers.ParseArgs(["--token", "t", "--verbosity"]);
         Assert.NotNull(r.Error);
         Assert.Contains("Missing value", r.Error);
     }
 
     [Fact]
-    public void WorkiqGateway_FlagRecognized()
+    public void StreamFlag_SetsStreamTrue()
     {
-        var r = Helpers.ParseArgs(["--workiq", "--token", "X"]);
+        var r = Helpers.ParseArgs(["--token", "t", "--stream"]);
         Assert.Null(r.Error);
-        Assert.True(r.Workiq);
+        Assert.True(r.Stream);
     }
 
     [Fact]
-    public void StreamFlag_SetsStreamTrue()
+    public void EndpointOverride_Captured()
     {
-        var r = Helpers.ParseArgs(["--graph", "--token", "t", "--stream"]);
+        var r = Helpers.ParseArgs(["--token", "t", "--endpoint", "https://custom.workiq.example/"]);
         Assert.Null(r.Error);
-        Assert.True(r.Stream);
+        Assert.Equal("https://custom.workiq.example/", r.Endpoint);
     }
 }
