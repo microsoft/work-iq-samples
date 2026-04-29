@@ -144,4 +144,29 @@ public class ArgParsingTests
         Assert.Equal("x", r.AppId);
         Assert.Equal("common", r.Tenant);
     }
+
+    [Fact]
+    public void ShowWire_LongFlag_Sets()
+    {
+        var r = Helpers.ParseArgs(["--token", "t", "--show-wire"]);
+        Assert.Null(r.Error);
+        Assert.True(r.ShowWire);
+    }
+
+    [Fact]
+    public void ShowWire_NotProvided_IsFalse()
+    {
+        var r = Helpers.ParseArgs(["--token", "t"]);
+        Assert.Null(r.Error);
+        Assert.False(r.ShowWire);
+    }
+
+    [Fact]
+    public void ShowWire_IndependentOfVerbosity()
+    {
+        var r = Helpers.ParseArgs(["--token", "t", "--show-wire", "-v", "0"]);
+        Assert.Null(r.Error);
+        Assert.True(r.ShowWire);
+        Assert.Equal(0, r.Verbosity);
+    }
 }

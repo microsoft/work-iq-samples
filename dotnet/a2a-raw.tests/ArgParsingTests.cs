@@ -148,4 +148,29 @@ public class ArgParsingTests
         Assert.Equal("t", r.Token);
         Assert.Equal("a", r.AppId);
     }
+
+    [Fact]
+    public void ShowWire_LongFlag_Sets()
+    {
+        var r = Helpers.ParseArgs(["-e", "https://example.com", "-t", "tok", "--show-wire"]);
+        Assert.Null(r.Error);
+        Assert.True(r.ShowWire);
+    }
+
+    [Fact]
+    public void ShowWire_NotProvided_IsFalse()
+    {
+        var r = Helpers.ParseArgs(["-e", "https://example.com", "-t", "tok"]);
+        Assert.Null(r.Error);
+        Assert.False(r.ShowWire);
+    }
+
+    [Fact]
+    public void ShowWire_CombinesWithStream()
+    {
+        var r = Helpers.ParseArgs(["-e", "https://example.com", "-t", "tok", "--show-wire", "--stream"]);
+        Assert.Null(r.Error);
+        Assert.True(r.ShowWire);
+        Assert.True(r.Stream);
+    }
 }

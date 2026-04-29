@@ -36,6 +36,7 @@ if (config.Verbosity >= 1)
 }
 
 WireLog.Verbosity = config.Verbosity;
+WireLog.ShowWire = config.ShowWire;
 var httpClient = CreateHttpClient(token, config.Gateway);
 
 // --list-agents: GET {endpoint}/.agents and print, then exit. The endpoint
@@ -135,6 +136,8 @@ while (true)
             var previousText = string.Empty;
             await foreach (var sseItem in a2a.SendMessageStreamingAsync(new MessageSendParams { Message = msg }))
             {
+                if (config.ShowWire) PrintSseEvent(sseItem);
+
                 if (sseItem.Data is TaskStatusUpdateEvent statusUpdate)
                 {
                     if (statusUpdate.Status.Message is AgentMessage agentMsg)
@@ -223,6 +226,31 @@ static HttpClient CreateHttpClient(string bearerToken, GatewayConfig gw)
     }
 
     return client;
+}
+
+// Prints each parsed streaming event as a JSON-RPC envelope. The A2A SDK has
+// already consumed the raw `data:` line by the time we get here, so we
+// re-serialize the parsed payload back to JSON. The visible JSON shape is
+// the same content the server sent inside `result` (the SDK strips the
+// outer `{jsonrpc, id, result}` envelope during parsing).
+static void PrintSseEvent(object sseItem)
+{
+    var data = sseItem.GetType().GetProperty("Data")?.GetValue(sseItem) ?? sseItem;
+    string json;
+    try
+    {
+        json = JsonSerializer.Serialize(data, new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        });
+    }
+    catch (Exception ex) { json = $"(serialize failed: {ex.Message})"; }
+
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.WriteLine($"\n  ← data ({data.GetType().Name}):");
+    foreach (var line in json.Split('\n')) Console.WriteLine($"      {line}");
+    Console.ResetColor();
 }
 
 static async Task ListAgentsAsync(string endpoint, HttpClient httpClient)
@@ -365,7 +393,7 @@ static Config? ParseArgs(string[] args)
     }
 
     string? token = a.Token, appId = a.AppId, endpoint = a.Endpoint, account = a.Account, tenant = a.Tenant, agentId = a.AgentId;
-    bool showToken = a.ShowToken, stream = a.Stream, listAgents = a.ListAgents;
+    bool showToken = a.ShowToken, stream = a.Stream, listAgents = a.ListAgents, showWire = a.ShowWire;
     int verbosity = a.Verbosity;
     var headers = a.Headers;
 
@@ -395,7 +423,9 @@ static Config? ParseArgs(string[] args)
               --show-token     Print the raw JWT token (for reuse with --token)
               --stream         Use streaming mode (SSE via message/stream)
               --list-agents    GET {endpoint}/.agents and print, then exit (no chat loop)
-              -v, --verbosity  0 = response only, 1 = default, 2 = full wire
+              --show-wire      Pretty-print raw JSON-RPC request/response bodies (and streaming
+                               SSE events). Independent of --verbosity.
+              -v, --verbosity  0 = response only, 1 = default, 2 = wire diagnostics
 
             Examples:
               dotnet run -- --token WAM --appid <your-app-id> --tenant <your-tenant>
@@ -427,7 +457,7 @@ static Config? ParseArgs(string[] args)
         gw = gw with { ExtraHeaders = [.. gw.ExtraHeaders, .. headers] };
     }
 
-    return new Config(token, appId ?? "", gw, account, tenant, agentId, showToken, verbosity, stream, listAgents);
+    return new Config(token, appId ?? "", gw, account, tenant, agentId, showToken, verbosity, stream, listAgents, showWire);
 }
 
 // ── Citations ─────────────────────────────────────────────────────────────
@@ -486,7 +516,7 @@ static void Ink(string s, ConsoleColor c) { Console.ForegroundColor = c; Console
 [DllImport("user32.dll", ExactSpelling = true)] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
 static IntPtr ConsoleWindowHandle() { var c = Win32GetConsoleWindow(); var r = GetAncestor(c, 3); return r != IntPtr.Zero ? r : c; }
 
-record Config(string Token, string AppId, GatewayConfig Gateway, string? Account, string? Tenant, string? AgentId, bool ShowToken, int Verbosity, bool Stream, bool ListAgents);
+record Config(string Token, string AppId, GatewayConfig Gateway, string? Account, string? Tenant, string? AgentId, bool ShowToken, int Verbosity, bool Stream, bool ListAgents, bool ShowWire);
 
 // ── Gateway definitions ──────────────────────────────────────────────────
 
@@ -507,26 +537,42 @@ class Gateways
 class WireLog : DelegatingHandler
 {
     public static int Verbosity { get; set; } = 1;
+    public static bool ShowWire { get; set; } = false;
+
+    private static readonly JsonSerializerOptions PrettyJson = new() { WriteIndented = true };
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage req, CancellationToken ct)
     {
-        if (Verbosity >= 2)
+        if (Verbosity >= 2 || ShowWire)
         {
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.WriteLine($"\n  ▶ {req.Method} {req.RequestUri}");
-            foreach (var h in req.Headers)
-                Console.WriteLine(h.Key.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
-                    ? $"    {h.Key}: Bearer ...({h.Value.First().Length}c)"
-                    : $"    {h.Key}: {string.Join(", ", h.Value)}");
+            if (Verbosity >= 2)
+            {
+                foreach (var h in req.Headers)
+                    Console.WriteLine(h.Key.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
+                        ? $"    {h.Key}: Bearer ...({h.Value.First().Length}c)"
+                        : $"    {h.Key}: {string.Join(", ", h.Value)}");
+            }
 
             if (req.Content is { } body)
             {
-                foreach (var h in body.Headers) Console.WriteLine($"    {h.Key}: {string.Join(", ", h.Value)}");
+                if (Verbosity >= 2)
+                    foreach (var h in body.Headers) Console.WriteLine($"    {h.Key}: {string.Join(", ", h.Value)}");
                 var text = await body.ReadAsStringAsync(ct);
-                Console.WriteLine($"    Body: {Trunc(text, 500)}");
+
+                if (ShowWire && IsJson(body.Headers.ContentType?.MediaType))
+                {
+                    Console.WriteLine($"    Body (raw JSON-RPC):");
+                    Console.WriteLine(Indent(PrettyJsonOrRaw(text), "      "));
+                }
+                else if (Verbosity >= 2)
+                {
+                    Console.WriteLine($"    Body: {Trunc(text, 500)}");
+                }
+
                 // Re-create content so the stream can be read again by SendAsync
-                var newContent = new StringContent(text, System.Text.Encoding.UTF8, body.Headers.ContentType?.MediaType ?? "application/json");
-                req.Content = newContent;
+                req.Content = new StringContent(text, System.Text.Encoding.UTF8, body.Headers.ContentType?.MediaType ?? "application/json");
             }
 
             Console.ResetColor();
@@ -536,16 +582,40 @@ class WireLog : DelegatingHandler
         try { res = await base.SendAsync(req, ct); }
         catch (Exception ex) { Ink($"  ◀ ERROR: {ex.Message}\n", ConsoleColor.Red); throw; }
 
-        if (Verbosity >= 2)
+        var contentType = res.Content?.Headers.ContentType?.MediaType;
+        var isStreaming = string.Equals(contentType, "text/event-stream", StringComparison.OrdinalIgnoreCase);
+
+        if (Verbosity >= 2 || ShowWire)
         {
             Console.ForegroundColor = (int)res.StatusCode >= 400 ? ConsoleColor.Red : ConsoleColor.DarkGray;
             Console.WriteLine($"  ◀ {(int)res.StatusCode} {res.StatusCode}");
-            foreach (var h in res.Headers) Console.WriteLine($"    {h.Key}: {string.Join(", ", h.Value)}");
-            if (res.Content != null)
-                foreach (var h in res.Content.Headers) Console.WriteLine($"    {h.Key}: {string.Join(", ", h.Value)}");
+            if (Verbosity >= 2)
+            {
+                foreach (var h in res.Headers) Console.WriteLine($"    {h.Key}: {string.Join(", ", h.Value)}");
+                if (res.Content != null)
+                    foreach (var h in res.Content.Headers) Console.WriteLine($"    {h.Key}: {string.Join(", ", h.Value)}");
+            }
 
+            // Always print error bodies (even in v2-only mode).
             if ((int)res.StatusCode >= 400 && res.Content != null)
+            {
                 Console.WriteLine($"    Body: {Trunc(await res.Content.ReadAsStringAsync(ct), 1000)}");
+            }
+            // For streaming responses, do NOT read the body here (would block until stream closes).
+            // The streaming consumer in the main loop logs each SSE event when --show-wire is set.
+            else if (ShowWire && isStreaming)
+            {
+                Console.WriteLine($"    (streaming response — see SSE events below)");
+            }
+            // For non-streaming JSON success responses, pretty-print the full body when --show-wire.
+            else if (ShowWire && IsJson(contentType) && res.Content != null)
+            {
+                var text = await res.Content.ReadAsStringAsync(ct);
+                Console.WriteLine($"    Body (raw JSON-RPC):");
+                Console.WriteLine(Indent(PrettyJsonOrRaw(text), "      "));
+                // Re-wrap so downstream readers (like the A2A SDK) can still parse it.
+                res.Content = new StringContent(text, System.Text.Encoding.UTF8, contentType ?? "application/json");
+            }
 
             Console.ResetColor();
         }
@@ -563,6 +633,22 @@ class WireLog : DelegatingHandler
 
         return res;
     }
+
+    static bool IsJson(string? mediaType) =>
+        mediaType != null && (mediaType.Contains("json", StringComparison.OrdinalIgnoreCase));
+
+    static string PrettyJsonOrRaw(string raw)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            return JsonSerializer.Serialize(doc.RootElement, PrettyJson);
+        }
+        catch { return raw; }
+    }
+
+    static string Indent(string text, string prefix) =>
+        string.Join("\n", text.Split('\n').Select(line => prefix + line));
 
     static string Trunc(string s, int max) => s.Length <= max ? s : $"{s[..max]}...";
     static void Ink(string s, ConsoleColor c) { Console.ForegroundColor = c; Console.Write(s); Console.ResetColor(); }

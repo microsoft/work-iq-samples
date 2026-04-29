@@ -156,6 +156,7 @@ You > quit
 | `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
 | `--agent-id, -A` | Invoke a specific agent (fetches `.well-known/agent-card.json` and POSTs to `agentCard.url`) |
 | `--list-agents` | GET `{endpoint}/.agents` and print, then exit (no chat loop). Use to discover agent IDs. |
+| `--show-wire` | Pretty-print raw JSON-RPC request/response bodies and each streaming SSE `data:` event as it arrives. Useful for protocol debugging. |
 | `--stream` | Use streaming mode (`message/stream` via SSE) |
 | `--all-headers` | Print every response header (default: only diagnostic ones) |
 

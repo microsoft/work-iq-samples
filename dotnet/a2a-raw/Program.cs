@@ -34,7 +34,7 @@ if (parsed.Error != null)
 string endpoint = parsed.Endpoint ?? "https://workiq.svc.cloud.microsoft/a2a/";
 string scope = parsed.Scope ?? "api://workiq.svc.cloud.microsoft/.default";
 string? token = parsed.Token, appId = parsed.AppId, account = parsed.Account, tenant = parsed.Tenant, agentId = parsed.AgentId;
-bool stream = parsed.Stream, allHeaders = parsed.AllHeaders, listAgents = parsed.ListAgents;
+bool stream = parsed.Stream, allHeaders = parsed.AllHeaders, listAgents = parsed.ListAgents, showWire = parsed.ShowWire;
 
 if (string.IsNullOrEmpty(token))
 {
@@ -265,13 +265,15 @@ while (true)
         var json = JsonSerializer.Serialize(jsonRpcRequest);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
+        if (showWire) PrintWireBody("▶ POST request", json);
+
         if (stream)
         {
-            await StreamResponse(http, endpoint, content, spinnerCts, spinnerTask);
+            await StreamResponse(http, endpoint, content, spinnerCts, spinnerTask, showWire);
         }
         else
         {
-            await SyncResponse(http, endpoint, content, spinnerCts, spinnerTask);
+            await SyncResponse(http, endpoint, content, spinnerCts, spinnerTask, showWire);
         }
     }
     catch (Exception ex)
@@ -288,7 +290,7 @@ while (true)
 
 // ── Sync: POST to base URL with method "message/send" ────────────────────
 
-async Task SyncResponse(HttpClient client, string ep, HttpContent body, CancellationTokenSource spinCts, Task spinTask)
+async Task SyncResponse(HttpClient client, string ep, HttpContent body, CancellationTokenSource spinCts, Task spinTask, bool showWire)
 {
     // v0.3: POST to the base URL (not /message:send) — method is inside the JSON-RPC body
     var res = await client.PostAsync(ep, body);
@@ -300,6 +302,8 @@ async Task SyncResponse(HttpClient client, string ep, HttpContent body, Cancella
     PrintResponseHeaders(res);
 
     var responseBody = await res.Content.ReadAsStringAsync();
+
+    if (showWire) PrintWireBody($"◀ {(int)res.StatusCode} {res.StatusCode} response", responseBody);
 
     if (!res.IsSuccessStatusCode)
     {
@@ -349,7 +353,7 @@ async Task SyncResponse(HttpClient client, string ep, HttpContent body, Cancella
 
 // ── Streaming: POST to base URL with method "message/stream" (SSE) ───────
 
-async Task StreamResponse(HttpClient client, string ep, HttpContent body, CancellationTokenSource spinCts, Task spinTask)
+async Task StreamResponse(HttpClient client, string ep, HttpContent body, CancellationTokenSource spinCts, Task spinTask, bool showWire)
 {
     // v0.3: POST to the base URL — method is inside the JSON-RPC body
     var request = new HttpRequestMessage(HttpMethod.Post, ep) { Content = body };
@@ -386,6 +390,8 @@ async Task StreamResponse(HttpClient client, string ep, HttpContent body, Cancel
         if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
         var data = line["data:".Length..].Trim();
         if (string.IsNullOrEmpty(data)) continue;
+
+        if (showWire) PrintWireBody("← SSE data", data);
 
         try
         {
@@ -473,6 +479,24 @@ async Task<(string token, IPublicClientApplication app, IAccount? account)> Acqu
     return (result.AccessToken, app, result.Account);
 }
 
+// ── Wire body logging (--show-wire) ──────────────────────────────────────
+
+static void PrintWireBody(string label, string raw)
+{
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.WriteLine($"\n  {label}:");
+    string body;
+    try
+    {
+        using var doc = JsonDocument.Parse(raw);
+        body = JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+    }
+    catch { body = raw; }
+
+    foreach (var line in body.Split('\n')) Console.WriteLine($"      {line}");
+    Console.ResetColor();
+}
+
 // ── Response headers ─────────────────────────────────────────────────────
 
 void PrintResponseHeaders(HttpResponseMessage res)
@@ -540,6 +564,8 @@ void PrintUsage()
       --stream         Use streaming mode (SSE via message/stream)
       --all-headers    Print all response headers (default: key diagnostics only)
       --list-agents    GET {endpoint}/.agents and print, then exit (no chat loop)
+      --show-wire      Pretty-print raw JSON-RPC request/response bodies (and each
+                       streaming SSE `data:` event as it arrives).
 
     Examples:
       # Work IQ Gateway (uses defaults)

@@ -125,6 +125,7 @@ If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and 
 | `--endpoint, -e` | Override the gateway host (scheme + authority only, no path) |
 | `--agent-id, -A` | Invoke a specific agent (fetches `{gateway}/{agent-id}/.well-known/agent-card.json` and posts to `agentCard.url`) |
 | `--list-agents` | GET `{endpoint}/.agents` and print, then exit (no chat loop). Use to discover agent IDs. |
+| `--show-wire` | Pretty-print raw JSON-RPC request/response bodies and each streaming SSE event as it arrives. Independent of `--verbosity`. Useful for protocol debugging. |
 | `--stream` | Use streaming mode (`message/stream` via SSE) |
 | `--header, -H` | Custom request header (repeatable) |
 | `--show-token` | Print the raw JWT after decoding |
