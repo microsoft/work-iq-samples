@@ -397,7 +397,20 @@ async Task StreamResponse(HttpClient client, string ep, HttpContent body, Cancel
     var responseStream = await res.Content.ReadAsStreamAsync();
     using var reader = new StreamReader(responseStream);
 
-    var previousText = "";
+    // A2A v1.0 streaming semantics (no dual-shape concern in streaming —
+    // Sydney's fedb1c9 only changed the sync path; streaming has used
+    // ArtifactUpdate events for the answer text from the start):
+    //   result.task            -> initial submitted task (informational)
+    //   result.statusUpdate    -> chain-of-thought OR terminal status; the
+    //                             final event carries citation metadata
+    //   result.artifactUpdate  -> answer chunks. Each event has an `append`
+    //                             flag: true => append parts to the artifact
+    //                             identified by artifactId; false => replace.
+    //                             The full answer is the concatenation of all
+    //                             append=true parts (with replaces applied).
+    //   result.message         -> direct message reply (rare in this flow)
+    var artifactBuffers = new Dictionary<string, StringBuilder>();
+    var lastChainOfThought = "";
 
     while (!reader.EndOfStream)
     {
@@ -425,18 +438,51 @@ async Task StreamResponse(HttpClient client, string ep, HttpContent body, Cancel
             // Extract contextId (v1.0: lives on task/message/statusUpdate/artifactUpdate)
             contextId = ExtractContextId(payload) ?? contextId;
 
-            // Extract and print text delta
-            var fullText = Helpers.ExtractText(payload);
-            if (fullText.StartsWith(previousText, StringComparison.Ordinal))
+            // Dispatch on event shape.
+            if (payload.TryGetProperty("artifactUpdate", out var au))
             {
-                Console.Write(fullText[previousText.Length..]);
-                previousText = fullText;
+                if (au.TryGetProperty("artifact", out var artifact))
+                {
+                    var aId = artifact.TryGetProperty("artifactId", out var aIdProp) ? aIdProp.GetString() ?? "" : "";
+                    var append = au.TryGetProperty("append", out var ap) && ap.ValueKind == JsonValueKind.True;
+
+                    if (Helpers.TryGetParts(artifact, out var chunk))
+                    {
+                        if (!artifactBuffers.TryGetValue(aId, out var sb))
+                        {
+                            sb = new StringBuilder();
+                            artifactBuffers[aId] = sb;
+                        }
+                        if (!append) sb.Clear();
+                        sb.Append(chunk);
+
+                        Console.Write(chunk);
+                    }
+                }
             }
-            else if (fullText != previousText)
+            else if (payload.TryGetProperty("statusUpdate", out var su))
             {
-                Console.Write(fullText);
-                previousText = fullText;
+                // Chain-of-thought / progress message (gray, on its own line),
+                // OR terminal state (just signals end of stream).
+                if (su.TryGetProperty("status", out var status))
+                {
+                    if (status.TryGetProperty("message", out var statusMsg) &&
+                        Helpers.TryGetParts(statusMsg, out var thought) &&
+                        thought != lastChainOfThought)
+                    {
+                        Console.ForegroundColor = ConsoleColor.DarkGray;
+                        Console.WriteLine($"\n  [{thought}]");
+                        Console.ResetColor();
+                        lastChainOfThought = thought;
+                    }
+                }
             }
+            else if (payload.TryGetProperty("message", out var m) &&
+                     Helpers.TryGetParts(m, out var msgText))
+            {
+                Console.Write(msgText);
+            }
+            // result.task -> initial; nothing to print at default verbosity.
         }
         catch { /* skip unparseable SSE events */ }
     }

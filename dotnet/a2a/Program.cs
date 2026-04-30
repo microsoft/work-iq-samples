@@ -137,88 +137,126 @@ while (true)
 
         if (effectiveStream)
         {
-            // Track candidate cumulative text from each shape — print whichever is
-            // currently longer. During Sydney's "answer-as-artifact" rollout, some
-            // rings populate both ArtifactUpdate.Artifact.Parts (new shape) AND
-            // StatusUpdate.Status.Message.Parts (legacy shape) with one being a
-            // fragment. Length-pick keeps output correct on either path without
-            // having to detect which shape is "valid".
-            // TODO(post-rollout): drop statusMessageText tracking; keep only artifactText.
-            var artifactText = string.Empty;
-            var statusMessageText = string.Empty;
-            var previousPrinted = string.Empty;
+            // A2A v1.0 streaming semantics:
+            //   - Task         : initial submitted state — informational only.
+            //   - StatusUpdate : chain-of-thought / progress messages OR the
+            //                    terminal state (Completed/Failed/...). The
+            //                    final StatusUpdate carries citation metadata
+            //                    in Status.Message.Metadata; its Parts are
+            //                    typically empty and never the "answer".
+            //   - ArtifactUpdate : the answer, streamed in chunks. Each event
+            //                    carries one or more parts and an Append flag:
+            //                      Append=true  -> append parts to the
+            //                        artifact identified by ArtifactId
+            //                      Append=false -> replace the artifact
+            //                        identified by ArtifactId.
+            //                    The full answer is the concatenation of all
+            //                    Append=true parts (with replaces applied) for
+            //                    each ArtifactId.
+            //
+            // No dual-shape rule needed in streaming: Sydney's fedb1c9 change
+            // (PR 5114178) only modified the sync path. Streaming has used
+            // ArtifactUpdate events for the answer text from the start.
+            var artifactBuffers = new Dictionary<string, StringBuilder>();
+            var lastChainOfThought = string.Empty;
 
             await foreach (var evt in a2a.SendStreamingMessageAsync(new SendMessageRequest { Message = msg }))
             {
                 if (config.ShowWire) PrintStreamEvent(evt);
 
-                bool reachedTerminal = false;
-
                 switch (evt.PayloadCase)
                 {
-                    case StreamResponseCase.ArtifactUpdate:
+                    case StreamResponseCase.Task:
                     {
-                        var artifact = evt.ArtifactUpdate!.Artifact;
-                        artifactText = Helpers.JoinText(artifact.Parts);
-
-                        if (config.Verbosity >= 1)
-                            Ink($"  [artifact {artifact.ArtifactId[..Math.Min(8, artifact.ArtifactId.Length)]} {artifact.Parts.Count} part(s)]\n", ConsoleColor.DarkGray);
+                        contextId = evt.Task!.ContextId;
+                        if (config.Verbosity >= 2)
+                            Ink($"  [task {ShortId(evt.Task.Id)} {evt.Task.Status.State}]\n", ConsoleColor.DarkGray);
                         break;
                     }
                     case StreamResponseCase.StatusUpdate:
                     {
-                        var statusUpdate = evt.StatusUpdate!;
-                        if (statusUpdate.Status.Message is { } statusMsg)
+                        var su = evt.StatusUpdate!;
+                        if (config.Verbosity >= 2)
+                            Ink($"  [{su.Status.State}]\n", ConsoleColor.DarkGray);
+
+                        if (su.Status.Message is { } statusMsg)
                         {
                             contextId = statusMsg.ContextId;
                             responseMetadata = statusMsg.Metadata;
-                            statusMessageText = Helpers.JoinText(statusMsg.Parts);
-                        }
-                        if (config.Verbosity >= 1)
-                            Ink($"  [{statusUpdate.Status.State}]\n", ConsoleColor.DarkGray);
 
-                        if (IsTerminal(statusUpdate.Status.State)) reachedTerminal = true;
+                            // Chain-of-thought: print once per unique progress line,
+                            // in gray, on its own line. Skipped for the terminal
+                            // event whose Parts are typically empty.
+                            var thought = Helpers.JoinText(statusMsg.Parts);
+                            if (!string.IsNullOrEmpty(thought) && thought != lastChainOfThought)
+                            {
+                                spinner.Stop();
+                                Ink($"  [{thought}]\n", ConsoleColor.DarkGray);
+                                lastChainOfThought = thought;
+                            }
+                        }
+
+                        if (IsTerminal(su.Status.State))
+                        {
+                            spinner.Stop();
+                            sw.Stop();
+                            Console.WriteLine();
+                            goto streaming_done;
+                        }
                         break;
                     }
-                    case StreamResponseCase.Task:
+                    case StreamResponseCase.ArtifactUpdate:
                     {
-                        contextId = evt.Task!.ContextId;
-                        if (config.Verbosity >= 1)
-                            Ink($"  [task {evt.Task.Id[..Math.Min(8, evt.Task.Id.Length)]} {evt.Task.Status.State}]\n", ConsoleColor.DarkGray);
+                        var au = evt.ArtifactUpdate!;
+                        var aId = au.Artifact.ArtifactId;
+                        if (!artifactBuffers.TryGetValue(aId, out var sb))
+                        {
+                            sb = new StringBuilder();
+                            artifactBuffers[aId] = sb;
+                        }
+
+                        var chunk = Helpers.JoinText(au.Artifact.Parts);
+
+                        if (au.Append)
+                        {
+                            sb.Append(chunk);
+                            if (chunk.Length > 0)
+                            {
+                                spinner.Stop();
+                                Console.Write(chunk);
+                            }
+                        }
+                        else
+                        {
+                            // Replace semantics: the artifact's current content is
+                            // discarded and replaced with this event's parts. For
+                            // a CLI we just print the new content (the overall UX
+                            // doesn't try to erase what was already shown).
+                            sb.Clear();
+                            sb.Append(chunk);
+                            if (chunk.Length > 0)
+                            {
+                                spinner.Stop();
+                                Console.Write(chunk);
+                            }
+                        }
+
+                        if (config.Verbosity >= 2)
+                            Ink($"  [artifact {ShortId(aId)} +{chunk.Length}c{(au.LastChunk ? " LAST" : "")}]\n", ConsoleColor.DarkGray);
                         break;
                     }
                     case StreamResponseCase.Message:
                     {
                         contextId = evt.Message!.ContextId;
                         responseMetadata = evt.Message.Metadata;
-                        // Direct Message reply — treat as artifact-equivalent text.
-                        artifactText = Helpers.JoinText(evt.Message.Parts);
+                        var text = Helpers.JoinText(evt.Message.Parts);
+                        if (text.Length > 0)
+                        {
+                            spinner.Stop();
+                            Console.Write(text);
+                        }
                         break;
                     }
-                }
-
-                // Shape-based pick: if Status.Message has text, this is a
-                // pre-fedb1c9 ring still emitting in the legacy location — use
-                // it. Otherwise use the artifact path. Same rule as sync mode.
-                var combined = !string.IsNullOrEmpty(statusMessageText)
-                    ? statusMessageText
-                    : artifactText;
-
-                if (combined.Length > previousPrinted.Length)
-                {
-                    spinner.Stop();
-                    Console.Write(combined.StartsWith(previousPrinted, StringComparison.Ordinal)
-                        ? combined[previousPrinted.Length..]
-                        : combined);
-                    previousPrinted = combined;
-                }
-
-                if (reachedTerminal)
-                {
-                    spinner.Stop();
-                    sw.Stop();
-                    Console.WriteLine();
-                    goto streaming_done;
                 }
             }
 
@@ -259,6 +297,8 @@ static (string text, string? contextId, Dictionary<string, JsonElement>? metadat
 
 static bool IsTerminal(TaskState state) =>
     state == TaskState.Completed || state == TaskState.Failed || state == TaskState.Canceled || state == TaskState.Rejected;
+
+static string ShortId(string id) => id.Length > 8 ? id[..8] : id;
 
 static HttpClient CreateHttpClient(string bearerToken, GatewayConfig gw)
 {
