@@ -121,6 +121,14 @@ while (true)
             Metadata = new Dictionary<string, JsonElement>
             {
                 ["Location"] = JsonSerializer.SerializeToElement(new { timeZoneOffset = (int)TimeZoneInfo.Local.BaseUtcOffset.TotalMinutes, timeZone = TimeZoneInfo.Local.Id }),
+
+                // Opt the streaming response into "Full" mode. In Full mode each
+                // ArtifactUpdate carries the full cumulative answer text with
+                // Append=false (replace). The default "Delta" mode currently has
+                // a known issue on the Work IQ Gateway where chunks can be
+                // dropped at sentence/paragraph boundaries; Full mode is not
+                // affected. Remove this opt-in once the Delta path is fixed.
+                ["StreamingMode"] = JsonSerializer.SerializeToElement("Full"),
             },
         };
 
@@ -207,6 +215,7 @@ while (true)
 
                         if (au.Append)
                         {
+                            // Delta semantics: chunk is the new tail.
                             sb.Append(chunk);
                             if (chunk.Length > 0)
                             {
@@ -216,22 +225,37 @@ while (true)
                         }
                         else
                         {
-                            // Replace semantics: the artifact's current content is
-                            // discarded and replaced with this event's parts. For
-                            // a CLI we just print the new content (the overall UX
-                            // doesn't try to erase what was already shown).
+                            // Replace semantics: chunk is the full new artifact text.
+                            // Work IQ's Full streaming mode sends each event as a
+                            // strict prefix-extension of the previous, so we print
+                            // only the new suffix (terminals can't un-write).
+                            var oldText = sb.ToString();
                             sb.Clear();
                             sb.Append(chunk);
-                            if (chunk.Length > 0)
+
+                            string toWrite;
+                            if (chunk.StartsWith(oldText, StringComparison.Ordinal))
+                            {
+                                toWrite = chunk[oldText.Length..];
+                            }
+                            else
+                            {
+                                // Defensive: replacement isn't an extension. Newline
+                                // and reprint, so the user can see the new content.
+                                if (oldText.Length > 0) Console.WriteLine();
+                                toWrite = chunk;
+                            }
+
+                            if (toWrite.Length > 0)
                             {
                                 spinner.Stop();
-                                Console.Write(chunk);
+                                Console.Write(toWrite);
                             }
                         }
 
-                        // Per-chunk markers are too noisy at -v 2 (Sydney emits very
-                        // small chunks, fragmenting the streamed answer). Show them
-                        // only with --show-wire alongside the raw event JSON.
+                        // Per-chunk markers are too noisy at -v 2 (the gateway can
+                        // emit very small chunks, fragmenting the streamed answer).
+                        // Show them only with --show-wire alongside the raw event JSON.
                         if (config.ShowWire)
                             Ink($"  [artifact {ShortId(aId)} +{chunk.Length}c{(au.LastChunk ? " LAST" : "")}]\n", ConsoleColor.DarkGray);
                         break;

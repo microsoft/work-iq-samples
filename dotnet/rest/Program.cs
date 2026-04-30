@@ -13,8 +13,8 @@ using Microsoft.Identity.Client;
 using Microsoft.Identity.Client.Broker;
 
 // --endpoint overrides only the host (scheme + authority); the path is fixed.
-// Work IQ Gateway multiplexes REST/A2A/MCP at one host via path prefix
-// (/rest, /a2a, /tools). AGS Slice R strips the /rest prefix before forwarding.
+// The Work IQ Gateway multiplexes REST/A2A/MCP at one host via path prefix
+// (/rest, /a2a, /tools).
 const string WorkIQDefaultHost = "https://workiq.svc.cloud.microsoft";
 const string WorkIQPath = "/rest/beta";
 

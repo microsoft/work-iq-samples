@@ -194,6 +194,14 @@ while (true)
             ["metadata"] = new Dictionary<string, object>
             {
                 ["Location"] = new { timeZoneOffset = (int)TimeZoneInfo.Local.BaseUtcOffset.TotalMinutes, timeZone = TimeZoneInfo.Local.Id },
+
+                // Opt the streaming response into "Full" mode. In Full mode each
+                // ArtifactUpdate carries the full cumulative answer text with
+                // append=false (replace). The default "Delta" mode currently has
+                // a known issue on the Work IQ Gateway where chunks can be
+                // dropped at sentence/paragraph boundaries; Full mode is not
+                // affected. Remove this opt-in once the Delta path is fixed.
+                ["StreamingMode"] = "Full",
             },
         };
 
@@ -386,10 +394,37 @@ async Task StreamResponse(HttpClient client, string ep, HttpContent body, Cancel
                             sb = new StringBuilder();
                             artifactBuffers[aId] = sb;
                         }
-                        if (!append) sb.Clear();
-                        sb.Append(chunk);
 
-                        Console.Write(chunk);
+                        if (append)
+                        {
+                            // Delta semantics: chunk is the new tail.
+                            sb.Append(chunk);
+                            Console.Write(chunk);
+                        }
+                        else
+                        {
+                            // Replace semantics: chunk is the full new artifact text.
+                            // Work IQ's Full streaming mode sends each event as a
+                            // strict prefix-extension of the previous, so we print
+                            // only the new suffix (terminals can't un-write).
+                            var oldText = sb.ToString();
+                            sb.Clear();
+                            sb.Append(chunk);
+
+                            string toWrite;
+                            if (chunk.StartsWith(oldText, StringComparison.Ordinal))
+                            {
+                                toWrite = chunk[oldText.Length..];
+                            }
+                            else
+                            {
+                                // Defensive: replacement isn't an extension.
+                                if (oldText.Length > 0) Console.WriteLine();
+                                toWrite = chunk;
+                            }
+
+                            if (toWrite.Length > 0) Console.Write(toWrite);
+                        }
                     }
                 }
             }

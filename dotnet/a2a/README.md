@@ -191,7 +191,7 @@ if (agentMessage.Metadata?.TryGetValue("attributions", out var attrs) == true
 - This sample targets **A2A v1.0** wire format: SCREAMING_SNAKE_CASE enums (`ROLE_USER`, `TASK_STATE_COMPLETED`), flat field-presence parts (no `kind` discriminator), and named result wrappers (`result.task`, `result.statusUpdate`, `result.artifactUpdate`). Method names are `SendMessage` / `SendStreamingMessage`.
 - Answer text comes back in `Artifact.Parts` (sync) or via `ArtifactUpdate` events (streaming). `Status.Message` carries chain-of-thought / progress and citation metadata, not the final answer text.
 - Citations and annotations live in `Status.Message.Metadata["attributions"]`. A subsequent change will move citations to a `DataPart` on the artifact (with media type `application/vnd.workiq-reference`); the sample will be updated when that ships.
-- The sample reconstructs the full accumulated text from streaming chunks by prefix-matching — Work IQ sends cumulative text per chunk, not deltas.
+- **Streaming mode**: the sample sets `metadata.StreamingMode = "Full"` on the outgoing message. In Full mode each `ArtifactUpdate` carries the full cumulative answer text with `Append = false`; the sample renders this as a delta by writing only the new suffix on each event. The default "Delta" mode (where each `ArtifactUpdate` carries just the new tail with `Append = true`) currently drops chunks at sentence/paragraph boundaries on the Work IQ Gateway — a server-side fix is in flight. The `StreamingMode = "Full"` opt-in will be removed once Delta mode is back to correct behavior.
 
 ## Wire diagnostics
 

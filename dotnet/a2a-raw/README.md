@@ -77,7 +77,7 @@ If `--stream` is set but the agent's card has `capabilities.streaming = false`, 
 {
   "name": "Researcher Agent",
   "description": "...",
-  "url": "https://substrate.office.com/m365Copilot/agents/<agent-id>/",
+  "url": "<agent-endpoint-url>",
   "version": "1.0",
   "capabilities": {
     "streaming": true,
@@ -202,11 +202,11 @@ data: {"jsonrpc":"2.0","id":"...","result":{"artifactUpdate":{"taskId":"<t>","co
 data: {"jsonrpc":"2.0","id":"...","result":{"statusUpdate":{"taskId":"<t>","contextId":"ctx-1","status":{"state":"TASK_STATE_COMPLETED"}}}}
 ```
 
-Text accumulates across `artifactUpdate` events (not incremental deltas). The sample diffs against the previous text to print only new content.
+### Streaming mode: Full (cumulative) vs Delta
 
-### Dual-shape extractor (rollout caveat)
+The sample sets `metadata.StreamingMode = "Full"` on the outgoing message. In Full mode each `artifactUpdate.artifact.parts[0].text` carries the **full cumulative answer text** with `append: false` (replace). The sample renders this as a delta by writing only the new suffix on each event.
 
-The Sydney "answer-as-artifact" change rolled out recently. During the brief WW rollout window, some rings still emit response text in `result.task.status.message.parts` (legacy v0.3 location) instead of `result.task.artifacts[].parts` (new). The sample's `Helpers.ExtractText` reads both shapes — preferring artifacts and falling back to status.message — so output is correct on either ring. This fallback will be removed in a follow-up release once the rollout is complete.
+The default mode is `"Delta"` — each `artifactUpdate` would carry just the new tail with `append: true`. Delta mode currently drops chunks at sentence/paragraph boundaries on the Work IQ Gateway (a server-side fix is in flight), so this sample opts into Full mode for now. The opt-in will be removed once Delta mode is back to correct behavior.
 
 ### Key v1.0 protocol details
 
