@@ -181,7 +181,7 @@ if (!string.IsNullOrEmpty(agentId))
 string? contextId = null;
 
 Console.WriteLine($"Connected to: {endpoint}");
-Console.WriteLine($"Mode: {(stream ? "streaming (message/stream)" : "sync (message/send)")}");
+Console.WriteLine($"Mode: {(stream ? "streaming (SendStreamingMessage)" : "sync (SendMessage)")}");
 Console.WriteLine("Type a message. 'quit' to exit.\n");
 
 // ── Chat loop ────────────────────────────────────────────────────────────
@@ -239,26 +239,26 @@ while (true)
 
     try
     {
-        // Build the A2A message (v0.3 format — requires "kind" discriminators)
+        // Build the A2A message (v1.0 format — no "kind" discriminators, ROLE_USER enum,
+        // flat parts shape; SCREAMING_SNAKE_CASE on enum values).
         var message = new Dictionary<string, object?>
         {
-            ["kind"] = "message",
-            ["role"] = "user",
+            ["role"] = "ROLE_USER",
             ["messageId"] = Guid.NewGuid().ToString(),
             ["contextId"] = contextId,
-            ["parts"] = new object[] { new { kind = "text", text = input } },
+            ["parts"] = new object[] { new { text = input } },
             ["metadata"] = new Dictionary<string, object>
             {
                 ["Location"] = new { timeZoneOffset = (int)TimeZoneInfo.Local.BaseUtcOffset.TotalMinutes, timeZone = TimeZoneInfo.Local.Id },
             },
         };
 
-        // Wrap in JSON-RPC envelope — v0.3 sends method inside the body, POSTs to base URL
+        // Wrap in JSON-RPC envelope — v1.0 method names: SendMessage / SendStreamingMessage.
         var jsonRpcRequest = new
         {
             jsonrpc = "2.0",
             id = Guid.NewGuid().ToString(),
-            method = stream ? "message/stream" : "message/send",
+            method = stream ? "SendStreamingMessage" : "SendMessage",
             @params = new { message },
         };
 
@@ -334,13 +334,8 @@ async Task SyncResponse(HttpClient client, string ep, HttpContent body, Cancella
 
     if (doc.RootElement.TryGetProperty("result", out var result))
     {
-        // Extract contextId for multi-turn
-        if (result.TryGetProperty("contextId", out var ctx))
-            contextId = ctx.GetString();
-        else if (result.TryGetProperty("status", out var status) &&
-                 status.TryGetProperty("message", out var msg) &&
-                 msg.TryGetProperty("contextId", out var sCtx))
-            contextId = sCtx.GetString();
+        // v1.0: contextId lives on result.task.contextId or result.message.contextId.
+        contextId = ExtractContextId(result) ?? contextId;
 
         var text = Helpers.ExtractText(result);
         Console.WriteLine(text);
@@ -351,11 +346,30 @@ async Task SyncResponse(HttpClient client, string ep, HttpContent body, Cancella
     }
 }
 
-// ── Streaming: POST to base URL with method "message/stream" (SSE) ───────
+// Walks a v1.0 `result` envelope for the contextId. Looks at task.contextId,
+// message.contextId, statusUpdate.contextId, artifactUpdate.contextId, and
+// (legacy) status.message.contextId.
+static string? ExtractContextId(JsonElement el)
+{
+    static string? Get(JsonElement e) => e.TryGetProperty("contextId", out var c) ? c.GetString() : null;
+
+    foreach (var key in new[] { "task", "message", "statusUpdate", "artifactUpdate" })
+    {
+        if (el.TryGetProperty(key, out var inner) && Get(inner) is { } id)
+            return id;
+    }
+    if (el.TryGetProperty("task", out var task) &&
+        task.TryGetProperty("status", out var status) &&
+        status.TryGetProperty("message", out var msg) &&
+        Get(msg) is { } legacyId) return legacyId;
+    return Get(el);
+}
+
+// ── Streaming: POST to base URL with method "SendStreamingMessage" (SSE) ──
 
 async Task StreamResponse(HttpClient client, string ep, HttpContent body, CancellationTokenSource spinCts, Task spinTask, bool showWire)
 {
-    // v0.3: POST to the base URL — method is inside the JSON-RPC body
+    // v1.0: POST to the base URL — method (`SendStreamingMessage`) is inside the JSON-RPC body.
     var request = new HttpRequestMessage(HttpMethod.Post, ep) { Content = body };
     request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
 
@@ -404,13 +418,8 @@ async Task StreamResponse(HttpClient client, string ep, HttpContent body, Cancel
             else
                 payload = doc.RootElement;
 
-            // Extract contextId
-            if (payload.TryGetProperty("contextId", out var ctx))
-                contextId = ctx.GetString();
-            else if (payload.TryGetProperty("status", out var st) &&
-                     st.TryGetProperty("message", out var m) &&
-                     m.TryGetProperty("contextId", out var sCtx))
-                contextId = sCtx.GetString();
+            // Extract contextId (v1.0: lives on task/message/statusUpdate/artifactUpdate)
+            contextId = ExtractContextId(payload) ?? contextId;
 
             // Extract and print text delta
             var fullText = Helpers.ExtractText(payload);

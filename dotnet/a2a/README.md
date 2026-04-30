@@ -2,7 +2,7 @@
 
 A minimal, single-file interactive client for communicating with Work IQ agents using the [Agent-to-Agent (A2A) protocol](https://a2a-protocol.org).
 
-Uses the [A2A .NET SDK](https://github.com/a2aproject/a2a-dotnet) (NuGet: [`A2A`](https://www.nuget.org/packages/A2A/)) for JSON-RPC transport. Supports both synchronous (`message/send`) and streaming (`message/stream`) modes against the **Work IQ Gateway**.
+Uses the [A2A .NET SDK](https://github.com/a2aproject/a2a-dotnet) (NuGet: [`A2A`](https://www.nuget.org/packages/A2A/)) for JSON-RPC transport. Supports both synchronous (`SendMessage`) and streaming (`SendStreamingMessage`) modes against the **Work IQ Gateway**.
 
 For the lower-level sample with no SDK (raw HTTP + JSON), see [`../a2a-raw/`](../a2a-raw/).
 
@@ -39,7 +39,7 @@ Type a message, see a response, type `quit` to exit.
 
 ### Streaming mode
 
-Add `--stream` to switch from `message/send` (sync) to `message/stream` (SSE).
+Add `--stream` to switch from `SendMessage` (sync) to `SendStreamingMessage` (SSE).
 
 ### Invoking a specific agent (`--agent-id`)
 
@@ -126,7 +126,7 @@ If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and 
 | `--agent-id, -A` | Invoke a specific agent (fetches `{gateway}/{agent-id}/.well-known/agent-card.json` and posts to `agentCard.url`) |
 | `--list-agents` | GET `{endpoint}/.agents` and print, then exit (no chat loop). Use to discover agent IDs. |
 | `--show-wire` | Pretty-print raw JSON-RPC request/response bodies and each streaming SSE event as it arrives. Independent of `--verbosity`. Useful for protocol debugging. |
-| `--stream` | Use streaming mode (`message/stream` via SSE) |
+| `--stream` | Use streaming mode (`SendStreamingMessage` via SSE) |
 | `--header, -H` | Custom request header (repeatable) |
 | `--show-token` | Print the raw JWT after decoding |
 | `-v, --verbosity` | `0` response only, `1` default, `2` full wire |
@@ -143,7 +143,7 @@ If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and 
 
 1. **Auth**: acquires a token via WAM or accepts a pre-obtained JWT.
 2. **A2A Client**: creates an `A2AClient` from the A2A .NET SDK pointed at the gateway endpoint.
-3. **Send**: `message/send` (sync) or `message/stream` (streaming).
+3. **Send**: `SendMessage` (sync) or `SendStreamingMessage` (streaming).
 4. **Receive**: parses `AgentMessage` or `AgentTask`; extracts text parts and citations from `metadata["attributions"]`.
 5. **Multi-turn**: maintains `contextId` across turns for conversation continuity.
 
@@ -151,10 +151,10 @@ If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and 
 
 | A2A Capability | Status | Notes |
 |---------------|--------|-------|
-| `message/send` (sync) | Available | Full request/response cycle |
-| `message/stream` (SSE) | Available | Incremental streaming via `TaskStatusUpdateEvent` |
+| `SendMessage` (sync) | Available | Full request/response cycle |
+| `SendStreamingMessage` (SSE) | Available | Incremental streaming via `TaskArtifactUpdateEvent` (and `TaskStatusUpdateEvent` for chain-of-thought / terminal status) |
 | Multi-turn (`contextId`) | Available | Conversation state maintained across turns |
-| `TextPart` messages | Available | User and agent text messages |
+| Text parts (`Part.FromText`) | Available | User and agent text messages |
 | Citations | Available | Via Microsoft-specific `metadata["attributions"]` (see below) |
 | Agent card (`/.well-known/agent.json`) | Coming soon | Connect to endpoint directly for now |
 | Agent discovery / listing | Coming soon | Connects to M365 Copilot agent directly for now |
@@ -198,9 +198,10 @@ if (agentMessage.Metadata?.TryGetValue("attributions", out var attrs) == true
 
 ## A2A protocol notes
 
-- Messages use the `kind` discriminator (v0.3 format).
-- Text parts come back as `TextPart`; citations and annotations live in message `Metadata["attributions"]`.
-- The sample reconstructs the full accumulated text from streaming chunks by prefix-matching (Work IQ sends cumulative text per chunk, not deltas).
+- This sample targets **A2A v1.0** wire format: SCREAMING_SNAKE_CASE enums (`ROLE_USER`, `TASK_STATE_COMPLETED`), flat field-presence parts (no `kind` discriminator), and named result wrappers (`result.task`, `result.statusUpdate`, `result.artifactUpdate`). Method names are `SendMessage` / `SendStreamingMessage`.
+- Text comes back via `Artifact.Parts` (preferred path) when targeting Work IQ. The sample also has a small fallback to `Status.Message.Parts` for the brief rollout window where some Sydney rings still emit text in the legacy location — both shapes are tested. The fallback will be removed in a follow-up release once the rollout completes.
+- Citations and annotations live in `Status.Message.Metadata["attributions"]`. A subsequent change will move citations to a `DataPart` on the artifact (with media type `application/vnd.workiq-reference`); the sample will be updated when that ships.
+- The sample reconstructs the full accumulated text from streaming chunks by prefix-matching — Work IQ sends cumulative text per chunk, not deltas.
 
 ## Wire diagnostics
 
@@ -210,7 +211,7 @@ Use `-v 2` to see full HTTP request/response details:
   > POST https://workiq.svc.cloud.microsoft/a2a/
     Authorization: Bearer ...(3089c)
     Content-Type: application/json
-    Body: {"jsonrpc":"2.0","method":"message/send","params":{...}}
+    Body: {"jsonrpc":"2.0","id":"...","method":"SendMessage","params":{"message":{...}}}
 
   < 200 OK
     request-id: d7d0989c-...
@@ -220,12 +221,12 @@ Use `-v 2` to see full HTTP request/response details:
 
 | Package | Purpose |
 |---------|---------|
-| [`A2A`](https://www.nuget.org/packages/A2A/) (0.3.3-preview) | A2A protocol client |
+| [`A2A`](https://www.nuget.org/packages/A2A/) (1.0.0-preview2) | A2A protocol client |
 | `Microsoft.Identity.Client` | MSAL token acquisition |
 | `Microsoft.Identity.Client.Broker` | Windows WAM broker |
 | `System.IdentityModel.Tokens.Jwt` | JWT decoding for diagnostics |
 
-> **Note:** This sample uses A2A SDK v0.3.3-preview. The spec has since moved to v1.0. See the [migration guide](https://github.com/a2aproject/a2a-dotnet/blob/main/docs/migration-guide-v1.md) when upgrading.
+> **Note:** This sample uses A2A SDK **v1.0.0-preview2**. For the v0.3 → v1.0 wire-format and API delta, see the [SDK migration guide](https://github.com/a2aproject/a2a-dotnet/blob/main/docs/migration-guide-v1.md). Work IQ also accepts v0.3 wire format via the `A2A-Version: 0.3` request header.
 
 ## Sample-specific troubleshooting
 

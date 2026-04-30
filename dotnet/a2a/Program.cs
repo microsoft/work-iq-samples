@@ -10,6 +10,7 @@ using System.Text.Json;
 using A2A;
 using Microsoft.Identity.Client;
 using Microsoft.Identity.Client.Broker;
+using WorkIQ.A2A;
 
 var config = ParseArgs(args);
 if (config == null) return;
@@ -67,8 +68,11 @@ if (!string.IsNullOrEmpty(config.AgentId))
         return;
     }
 
-    a2aEndpoint = agentCard.Url;
-    if (config.Stream && !agentCard.Capabilities.Streaming)
+    // v1.0: AgentCard.Url is gone; the URL lives in SupportedInterfaces[].Url.
+    var resolvedUrl = agentCard.SupportedInterfaces.FirstOrDefault()?.Url ?? config.Gateway.Endpoint;
+    a2aEndpoint = resolvedUrl;
+    var streamingSupported = agentCard.Capabilities.Streaming == true;
+    if (config.Stream && !streamingSupported)
     {
         if (config.Verbosity >= 1) Ink($"  note: agent '{agentCard.Name}' does not advertise streaming; falling back to sync\n", ConsoleColor.DarkYellow);
         effectiveStream = false;
@@ -79,8 +83,8 @@ if (!string.IsNullOrEmpty(config.AgentId))
         Log("AGENT");
         Console.WriteLine($"  id              {config.AgentId}");
         Console.WriteLine($"  name            {agentCard.Name}");
-        Console.WriteLine($"  url             {agentCard.Url}");
-        Console.WriteLine($"  streaming       {agentCard.Capabilities.Streaming}");
+        Console.WriteLine($"  url             {resolvedUrl}");
+        Console.WriteLine($"  streaming       {streamingSupported}");
     }
 }
 
@@ -116,12 +120,12 @@ while (true)
     spinner.Start();
     try
     {
-        var msg = new AgentMessage
+        var msg = new Message
         {
-            Role = MessageRole.User,
+            Role = Role.User,
             MessageId = Guid.NewGuid().ToString(),
             ContextId = contextId,
-            Parts = [new TextPart { Text = input }],
+            Parts = [Part.FromText(input)],
             Metadata = new Dictionary<string, JsonElement>
             {
                 ["Location"] = JsonSerializer.SerializeToElement(new { timeZoneOffset = (int)TimeZoneInfo.Local.BaseUtcOffset.TotalMinutes, timeZone = TimeZoneInfo.Local.Id }),
@@ -133,60 +137,100 @@ while (true)
 
         if (effectiveStream)
         {
+            // Track the latest cumulative text we've seen so we can print only new content.
+            // Both sources are read because Sydney's "answer-as-artifact" rollout is in flight:
+            //   - New shape (post-fedb1c9): text accumulates in ArtifactUpdate.Artifact.Parts[Text]
+            //   - Legacy shape (pre-fedb1c9): text appears in StatusUpdate.Status.Message.Parts[Text]
+            // TODO(post-rollout): remove the Status.Message text path; keep only ArtifactUpdate.
             var previousText = string.Empty;
-            await foreach (var sseItem in a2a.SendMessageStreamingAsync(new MessageSendParams { Message = msg }))
+            await foreach (var evt in a2a.SendStreamingMessageAsync(new SendMessageRequest { Message = msg }))
             {
-                if (config.ShowWire) PrintSseEvent(sseItem);
+                if (config.ShowWire) PrintStreamEvent(evt);
 
-                if (sseItem.Data is TaskStatusUpdateEvent statusUpdate)
+                string? combined = null;
+
+                switch (evt.PayloadCase)
                 {
-                    if (statusUpdate.Status.Message is AgentMessage agentMsg)
+                    case StreamResponseCase.ArtifactUpdate:
                     {
-                        contextId = agentMsg.ContextId;
-                        responseMetadata = agentMsg.Metadata;
+                        var artifact = evt.ArtifactUpdate!.Artifact;
+                        combined = Helpers.JoinText(artifact.Parts);
 
-                        // -v 1+: show A2A event details (state, part types, sizes)
                         if (config.Verbosity >= 1)
-                        {
-                            var parts = agentMsg.Parts.Select(p => p switch
-                            {
-                                TextPart tp => $"TextPart({tp.Text?.Length ?? 0}c)",
-                                DataPart dp => $"DataPart",
-                                FilePart fp => $"FilePart({fp.File?.Name ?? "?"})",
-                                _ => p.GetType().Name
-                            });
-                            Ink($"  [{statusUpdate.Status.State}] {string.Join(" + ", parts)}\n", ConsoleColor.DarkGray);
-                        }
-
-                        var combined = string.Join("", agentMsg.Parts.OfType<TextPart>().Select(p => p.Text));
-                        spinner.Stop();
-
-                        // Print text delta
-                        if (combined.StartsWith(previousText, StringComparison.Ordinal))
-                        {
-                            Console.Write(combined[previousText.Length..]);
-                            previousText = combined;
-                        }
-                        else
-                        {
-                            Console.Write(combined);
-                            previousText = combined;
-                        }
-                    }
-
-                    if (statusUpdate.Final || statusUpdate.Status.State == TaskState.Completed)
-                    {
+                            Ink($"  [artifact {artifact.ArtifactId[..Math.Min(8, artifact.ArtifactId.Length)]} {artifact.Parts.Count} part(s)]\n", ConsoleColor.DarkGray);
                         break;
+                    }
+                    case StreamResponseCase.StatusUpdate:
+                    {
+                        var statusUpdate = evt.StatusUpdate!;
+                        if (statusUpdate.Status.Message is { } statusMsg)
+                        {
+                            contextId = statusMsg.ContextId;
+                            responseMetadata = statusMsg.Metadata;
+                            // Only treat status-message text as the response if no artifact text has
+                            // arrived yet (legacy pre-fedb1c9 shape).
+                            if (string.IsNullOrEmpty(previousText))
+                                combined = Helpers.JoinText(statusMsg.Parts);
+                        }
+                        if (config.Verbosity >= 1)
+                            Ink($"  [{statusUpdate.Status.State}]\n", ConsoleColor.DarkGray);
+
+                        if (IsTerminal(statusUpdate.Status.State))
+                        {
+                            spinner.Stop();
+                            // Print any tail text from this final event before exiting.
+                            if (combined != null && combined.Length > previousText.Length)
+                            {
+                                Console.Write(combined.StartsWith(previousText, StringComparison.Ordinal)
+                                    ? combined[previousText.Length..]
+                                    : combined);
+                            }
+                            sw.Stop();
+                            Console.WriteLine();
+                            goto streaming_done;
+                        }
+                        break;
+                    }
+                    case StreamResponseCase.Task:
+                    {
+                        contextId = evt.Task!.ContextId;
+                        if (config.Verbosity >= 1)
+                            Ink($"  [task {evt.Task.Id[..Math.Min(8, evt.Task.Id.Length)]} {evt.Task.Status.State}]\n", ConsoleColor.DarkGray);
+                        break;
+                    }
+                    case StreamResponseCase.Message:
+                    {
+                        contextId = evt.Message!.ContextId;
+                        responseMetadata = evt.Message.Metadata;
+                        combined = Helpers.JoinText(evt.Message.Parts);
+                        break;
+                    }
+                }
+
+                if (combined != null)
+                {
+                    spinner.Stop();
+                    // Print delta from previous (cumulative-text streaming convention).
+                    if (combined.StartsWith(previousText, StringComparison.Ordinal))
+                    {
+                        Console.Write(combined[previousText.Length..]);
+                        previousText = combined;
+                    }
+                    else if (combined != previousText)
+                    {
+                        Console.Write(combined);
+                        previousText = combined;
                     }
                 }
             }
 
             sw.Stop();
             Console.WriteLine();
+            streaming_done:;
         }
         else
         {
-            var response = await a2a.SendMessageAsync(new MessageSendParams { Message = msg });
+            var response = await a2a.SendMessageAsync(new SendMessageRequest { Message = msg });
             sw.Stop();
             spinner.Stop();
             var (text, ctx, meta) = Extract(response);
@@ -212,8 +256,11 @@ while (true)
 
 // ── Core helpers ─────────────────────────────────────────────────────────
 
-static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(object response)
+static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(SendMessageResponse response)
     => WorkIQ.A2A.Helpers.Extract(response);
+
+static bool IsTerminal(TaskState state) =>
+    state == TaskState.Completed || state == TaskState.Failed || state == TaskState.Canceled || state == TaskState.Rejected;
 
 static HttpClient CreateHttpClient(string bearerToken, GatewayConfig gw)
 {
@@ -228,14 +275,23 @@ static HttpClient CreateHttpClient(string bearerToken, GatewayConfig gw)
     return client;
 }
 
-// Prints each parsed streaming event as a JSON-RPC envelope. The A2A SDK has
-// already consumed the raw `data:` line by the time we get here, so we
-// re-serialize the parsed payload back to JSON. The visible JSON shape is
-// the same content the server sent inside `result` (the SDK strips the
-// outer `{jsonrpc, id, result}` envelope during parsing).
-static void PrintSseEvent(object sseItem)
+// Prints each parsed streaming event as JSON. The A2A SDK has already consumed
+// the raw `data:` line by the time we get here, so we re-serialize the parsed
+// StreamResponse payload back to JSON. The visible JSON shape matches what the
+// server sent inside `result` (the SDK strips the outer `{jsonrpc, id, result}`
+// envelope during parsing).
+static void PrintStreamEvent(StreamResponse evt)
 {
-    var data = sseItem.GetType().GetProperty("Data")?.GetValue(sseItem) ?? sseItem;
+    object? data = evt.PayloadCase switch
+    {
+        StreamResponseCase.Task => evt.Task,
+        StreamResponseCase.Message => evt.Message,
+        StreamResponseCase.StatusUpdate => evt.StatusUpdate,
+        StreamResponseCase.ArtifactUpdate => evt.ArtifactUpdate,
+        _ => null,
+    };
+    if (data is null) return;
+
     string json;
     try
     {
@@ -248,7 +304,7 @@ static void PrintSseEvent(object sseItem)
     catch (Exception ex) { json = $"(serialize failed: {ex.Message})"; }
 
     Console.ForegroundColor = ConsoleColor.DarkGray;
-    Console.WriteLine($"\n  ← data ({data.GetType().Name}):");
+    Console.WriteLine($"\n  ← data ({evt.PayloadCase}):");
     foreach (var line in json.Split('\n')) Console.WriteLine($"      {line}");
     Console.ResetColor();
 }

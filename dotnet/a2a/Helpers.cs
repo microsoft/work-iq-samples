@@ -65,15 +65,43 @@ public static class Helpers
         static A2AArgs Err(string msg) => new(null, null, null, null, null, null, false, false, false, false, 1, new List<string>(), msg);
     }
 
-    // ── Response extraction (uses A2A SDK types) ────────────────────────
+    // ── Sync response extraction (A2A SDK v1.0 SendMessageResponse) ─────
 
-    public static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(object response) => response switch
+    public static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(SendMessageResponse response) => response.PayloadCase switch
     {
-        AgentMessage am => (Join(am), am.ContextId, am.Metadata),
-        AgentTask { Status: { State: TaskState.Completed, Message: AgentMessage cm } } t => (Join(cm), t.ContextId, cm.Metadata),
-        AgentTask t => ($"[Task {t.Id} — {t.Status.State}]", t.ContextId, null),
+        SendMessageResponseCase.Message => (
+            JoinText(response.Message!.Parts),
+            response.Message.ContextId,
+            response.Message.Metadata),
+        SendMessageResponseCase.Task => (
+            ExtractTextFromTask(response.Task!),
+            response.Task.ContextId,
+            response.Task.Status.Message?.Metadata),    // citations: still in Status.Message.Metadata until DataPart migration ships
         _ => ("(no response)", null, null),
     };
 
-    public static string Join(AgentMessage m) => string.Join("\n", m.Parts.OfType<TextPart>().Select(p => p.Text));
+    // TODO(post-fedb1c9 WW rollout, ~early May 2026): drop the Status.Message.Parts
+    // text fallback once Sydney's "answer-as-artifact" change has fully rolled out.
+    // Tracking: Sydney master commit fedb1c9 (PR 5114178). The fallback exists so
+    // the sample produces a non-empty response during the brief window where Sydney
+    // rings still emit text in Status.Message.Parts (legacy shape).
+    public static string ExtractTextFromTask(AgentTask task)
+    {
+        // Preferred (post-fedb1c9): text in Artifacts[].Parts[Text].
+        var fromArtifacts = JoinText(
+            (task.Artifacts ?? new List<Artifact>()).SelectMany(a => a.Parts));
+        if (!string.IsNullOrEmpty(fromArtifacts)) return fromArtifacts;
+
+        // Fallback (pre-fedb1c9): text in Status.Message.Parts[Text].
+        if (task.Status.Message?.Parts is { } msgParts)
+        {
+            var fromMsg = JoinText(msgParts);
+            if (!string.IsNullOrEmpty(fromMsg)) return fromMsg;
+        }
+
+        return $"[Task {task.Id} — {task.Status.State}]";
+    }
+
+    public static string JoinText(IEnumerable<Part> parts) =>
+        string.Join("\n", parts.Where(p => p.ContentCase == PartContentCase.Text).Select(p => p.Text!));
 }

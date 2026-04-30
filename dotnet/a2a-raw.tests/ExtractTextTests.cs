@@ -194,4 +194,160 @@ public class ExtractTextTests
         var el = Parse("""{ "parts": [{ "text": "🚀 你好世界 مرحبا" }] }""");
         Assert.Equal("🚀 你好世界 مرحبا", Helpers.ExtractText(el));
     }
+
+    // ── A2A v1.0 dual-shape tests ──────────────────────────────────────────
+    //
+    // Sydney is mid-rollout for the "answer-as-artifact" change (commit fedb1c9 /
+    // PR 5114178). During the rollout window, response text may arrive in either
+    // shape. ExtractText must prefer the new artifact path while falling back to
+    // the legacy status.message path when artifacts are absent.
+
+    [Fact]
+    public void ExtractText_TaskArtifacts_PreferredOverStatusMessage()
+    {
+        // result.task.artifacts (new) AND result.task.status.message (legacy) both present.
+        var el = Parse("""
+        {
+            "task": {
+                "id": "t1",
+                "contextId": "ctx-1",
+                "status": {
+                    "state": "TASK_STATE_COMPLETED",
+                    "message": { "parts": [{ "text": "LEGACY text" }] }
+                },
+                "artifacts": [
+                    {
+                        "artifactId": "a1",
+                        "name": "Answer",
+                        "parts": [{ "text": "NEW text" }]
+                    }
+                ]
+            }
+        }
+        """);
+        Assert.Equal("NEW text", Helpers.ExtractText(el));
+    }
+
+    [Fact]
+    public void ExtractText_TaskOnlyStatusMessage_FallsBackToLegacy()
+    {
+        // Pre-fedb1c9 server: text in result.task.status.message.parts only.
+        var el = Parse("""
+        {
+            "task": {
+                "id": "t-legacy",
+                "status": {
+                    "state": "TASK_STATE_COMPLETED",
+                    "message": { "parts": [{ "text": "Legacy answer" }] }
+                }
+            }
+        }
+        """);
+        Assert.Equal("Legacy answer", Helpers.ExtractText(el));
+    }
+
+    [Fact]
+    public void ExtractText_TaskArtifactsAcrossMultipleArtifacts_AllConcatenated()
+    {
+        var el = Parse("""
+        {
+            "task": {
+                "id": "t-multi",
+                "artifacts": [
+                    { "artifactId": "a1", "parts": [{ "text": "Part1 " }] },
+                    { "artifactId": "a2", "parts": [{ "text": "Part2" }] }
+                ]
+            }
+        }
+        """);
+        Assert.Equal("Part1 Part2", Helpers.ExtractText(el));
+    }
+
+    [Fact]
+    public void ExtractText_StreamingArtifactUpdate_ReturnsArtifactText()
+    {
+        // Streaming event: result.artifactUpdate.artifact.parts (preferred).
+        var el = Parse("""
+        {
+            "artifactUpdate": {
+                "taskId": "t1",
+                "contextId": "ctx-1",
+                "artifact": {
+                    "artifactId": "a1",
+                    "parts": [{ "text": "streamed" }]
+                }
+            }
+        }
+        """);
+        Assert.Equal("streamed", Helpers.ExtractText(el));
+    }
+
+    [Fact]
+    public void ExtractText_StreamingStatusUpdate_LegacyMessageText()
+    {
+        // Streaming event from a pre-fedb1c9 ring: text in statusUpdate.status.message.
+        var el = Parse("""
+        {
+            "statusUpdate": {
+                "taskId": "t1",
+                "contextId": "ctx-1",
+                "status": {
+                    "state": "TASK_STATE_WORKING",
+                    "message": { "parts": [{ "text": "thinking..." }] }
+                }
+            }
+        }
+        """);
+        Assert.Equal("thinking...", Helpers.ExtractText(el));
+    }
+
+    [Fact]
+    public void ExtractText_StreamingStatusUpdateNoMessage_ReturnsEmpty()
+    {
+        // Terminal state with no message attached — common shape.
+        var el = Parse("""
+        {
+            "statusUpdate": {
+                "taskId": "t1",
+                "contextId": "ctx-1",
+                "status": { "state": "TASK_STATE_COMPLETED" }
+            }
+        }
+        """);
+        Assert.Equal("", Helpers.ExtractText(el));
+    }
+
+    [Fact]
+    public void ExtractText_TaskWithEmptyArtifacts_FallsBackToStatusMessage()
+    {
+        var el = Parse("""
+        {
+            "task": {
+                "id": "t-empty-art",
+                "status": {
+                    "message": { "parts": [{ "text": "from status" }] }
+                },
+                "artifacts": []
+            }
+        }
+        """);
+        Assert.Equal("from status", Helpers.ExtractText(el));
+    }
+
+    [Fact]
+    public void ExtractText_V1MessagePayload_ReturnsText()
+    {
+        // result.message — direct Message reply (no task at all).
+        var el = Parse("""
+        {
+            "message": {
+                "role": "ROLE_AGENT",
+                "messageId": "m1",
+                "contextId": "ctx-1",
+                "parts": [{ "text": "Direct message reply" }]
+            }
+        }
+        """);
+        Assert.Equal("Direct message reply", Helpers.ExtractText(el));
+    }
 }
