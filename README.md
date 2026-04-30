@@ -6,6 +6,8 @@ Sample clients for the [Work IQ](https://learn.microsoft.com/en-us/microsoft-365
 |--------|----------|----------|----------|-------------|
 | [**dotnet/a2a/**](dotnet/a2a/) | C# | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Interactive agent session using the A2A protocol over JSON-RPC |
 | [**dotnet/a2a-raw/**](dotnet/a2a-raw/) | C# | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Same, but with raw `HttpClient` + JSON (no A2A SDK) |
+| [**rust/a2a/**](rust/a2a/) | Rust | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Interactive agent session with device code auth and token caching |
+| [**swift/a2a/**](swift/a2a/) | Swift | iOS/iPadOS (macOS to build) | [A2A](https://a2a-protocol.org) | SwiftUI chat app with streaming responses |
 
 ---
 
@@ -21,7 +23,8 @@ All .NET samples target the **Work IQ Gateway** (`workiq.svc.cloud.microsoft`) �
 2. **Entra app registration** configured in your tenant — this is a one-time setup per tenant. Details below.
 3. **Your language toolchain**:
    - **dotnet/** samples: [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later
-
+   - **rust/** samples: [Rust toolchain](https://rustup.rs/) (stable)
+   - **swift/** samples: [Xcode 26+](https://developer.apple.com/xcode/) (macOS only)
 ### App registration setup
 
 You (or your tenant admin) must create an Entra app registration with specific permissions, redirect URIs, and consent. This is a ~5-minute task.
@@ -57,6 +60,14 @@ dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
 ```
 
 > **Note:** WAM is only available on Windows. On macOS and Linux, MSAL falls back to an interactive browser sign-in using the `http://localhost` redirect URI — same command works.
+
+### Device code flow — Rust, Swift
+
+```bash
+cd rust/a2a
+cargo run -- --appid <APP_ID>
+# Follow the on-screen instructions to authenticate in a browser.
+```
 
 ### Pre-obtained JWT token — all platforms, all samples
 
