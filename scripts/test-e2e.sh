@@ -8,7 +8,7 @@ set -euo pipefail
 # deletes the app on exit. Each invocation is interactive: send a
 # message when prompted, type 'quit' to move on to the next.
 #
-# Requires: Azure CLI (logged in), .NET 10 SDK.
+# Requires: Azure CLI (logged in), .NET 8 SDK or later.
 #
 # Usage:
 #   scripts/test-e2e.sh --account user@tenant.com
@@ -78,7 +78,7 @@ if ! az account show >/dev/null 2>&1; then
 fi
 
 if ! command -v dotnet >/dev/null 2>&1; then
-  echo "ERROR: dotnet CLI not found. Install .NET 10 SDK." >&2
+  echo "ERROR: dotnet CLI not found. Install .NET 8 SDK or later." >&2
   exit 1
 fi
 

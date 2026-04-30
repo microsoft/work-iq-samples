@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 //
 // WorkIQ A2A Raw Sample — Minimal A2A client using only HttpClient + JSON
-// No A2A SDK. Shows exactly what goes over the wire (JSON-RPC v0.3 format).
+// No A2A SDK. Shows exactly what goes over the wire (JSON-RPC v1.0 format).
 //
 // Targets the Work IQ Gateway (`https://workiq.svc.cloud.microsoft/a2a/`).
 //
@@ -221,7 +221,7 @@ while (true)
 
 async Task SyncResponse(HttpClient client, string ep, HttpContent body, CancellationTokenSource spinCts, Task spinTask, bool showWire)
 {
-    // v0.3: POST to the base URL (not /message:send) — method is inside the JSON-RPC body
+    // POST to the base URL — the method (SendMessage) is inside the JSON-RPC body.
     var res = await client.PostAsync(ep, body);
 
     // Stop spinner now that we have a response
@@ -396,7 +396,7 @@ static IntPtr ConsoleWindowHandle() { var c = GetConsoleWindow(); var r = GetAnc
 void PrintUsage()
 {
     Console.WriteLine("""
-    Work IQ A2A Raw Sample — minimal A2A client, no SDK (JSON-RPC v0.3 wire format)
+    Work IQ A2A Raw Sample — minimal A2A client, no SDK (JSON-RPC v1.0 wire format)
 
     Usage:
       dotnet run -- --token <JWT|WAM> [options]

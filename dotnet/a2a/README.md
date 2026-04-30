@@ -31,7 +31,7 @@ The **Agent-to-Agent (A2A) Protocol** is an open standard for communication betw
 
 ## Quick start
 
-### Default — talk to the Work IQ Gateway's BizChat agent
+### Default — talk to the Work IQ Gateway's default agent
 
 ```bash
 dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
@@ -41,7 +41,7 @@ Type a message, see a response, type `quit` to exit.
 
 ### Invoking a specific agent (`--agent-id`)
 
-Without `--agent-id`, the sample posts directly to the gateway endpoint (the default BizChat agent). To invoke a specific agent, pass `--agent-id <id>`:
+Without `--agent-id`, the sample posts directly to the gateway endpoint (the default agent). To invoke a specific agent, pass `--agent-id <id>`:
 
 ```bash
 dotnet run -- --token WAM --agent-id <AGENT_ID> \
@@ -143,7 +143,7 @@ If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and 
 | Text parts (`Part.FromText`) | Available | User and agent text messages |
 | Citations | Available | Via Microsoft-specific `metadata["attributions"]` (see below) |
 | Agent card (`/.well-known/agent.json`) | Coming soon | Connect to endpoint directly for now |
-| Agent discovery / listing | Coming soon | Connects to M365 Copilot agent directly for now |
+| Agent discovery / listing | Coming soon | Connects to the gateway's default agent directly for now |
 
 ## Citations
 
@@ -218,7 +218,7 @@ Use `-v 2` to see full HTTP request/response details:
 
 | Symptom | Fix |
 |---------|-----|
-| Empty response / `[Task ... — Working]` never completes | Increase the client timeout (`Timeout = TimeSpan.FromMinutes(5)` by default in `Program.cs`). Long-running grounded queries can take 30-60s on some rings. |
+| Empty response / `[Task ... — Working]` never completes | Increase the client timeout (`Timeout = TimeSpan.FromMinutes(5)` by default in `Program.cs`). Long-running grounded queries can take 30-60s in some environments. |
 | `401 Unauthorized` | Token audience doesn't match the gateway. Check the `aud` claim in the `── TOKEN ──` block. |
 
 See the [root README](../../README.md#troubleshooting) for the full troubleshooting matrix.

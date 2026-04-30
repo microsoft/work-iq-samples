@@ -263,7 +263,7 @@ static void PrintUsage()
                            from {gateway}/{agent-id}/.well-known/agent-card.json and
                            uses agentCard.url as the A2A endpoint. Without --agent-id,
                            the sample posts to the gateway endpoint directly (the
-                           default BizChat agent).
+                           gateway's default agent).
           --header, -H     Custom HTTP header in 'Key: Value' format (repeatable)
           --show-token     Print the raw JWT token (for reuse with --token)
           --show-wire      Pretty-print raw JSON-RPC request/response bodies.

@@ -35,7 +35,7 @@ Use this sample when you want to understand the A2A protocol at the HTTP level, 
 
 ## Quick start
 
-### Against the Work IQ Gateway (default — prod host)
+### Against the Work IQ Gateway (default)
 
 ```bash
 dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
@@ -122,7 +122,6 @@ Agent > Today you have:
   - 2:00 PM — customer call
   [200 OK]
   request-id: a1b2c3d4-...
-  x-ms-ags-diagnostic: {"ServerInfo":{"DataCenter":"...","Slice":"R"}}
 
 You > quit
 ```
