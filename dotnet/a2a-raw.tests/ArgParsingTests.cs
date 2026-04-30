@@ -41,6 +41,15 @@ public class ArgParsingTests
     }
 
     [Fact]
+    public void StreamFlag_ReturnsComingSoonError()
+    {
+        var r = Helpers.ParseArgs(["--endpoint", "u", "--token", "t", "--stream"]);
+        Assert.NotNull(r.Error);
+        Assert.Contains("--stream is not supported", r.Error);
+        Assert.Contains("coming soon", r.Error);
+    }
+
+    [Fact]
     public void AllHeadersFlag_Parsed()
     {
         var r = Helpers.ParseArgs(["--all-headers", "--endpoint", "url", "--token", "t"]);

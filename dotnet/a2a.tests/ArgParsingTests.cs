@@ -30,6 +30,15 @@ public class ArgParsingTests
     }
 
     [Fact]
+    public void StreamFlag_ReturnsComingSoonError()
+    {
+        var r = Helpers.ParseArgs(["--token", "t", "--stream"]);
+        Assert.NotNull(r.Error);
+        Assert.Contains("--stream is not supported", r.Error);
+        Assert.Contains("coming soon", r.Error);
+    }
+
+    [Fact]
     public void EndpointOverride_Captured()
     {
         var r = Helpers.ParseArgs(["--token", "t", "--endpoint", "https://custom.com/"]);

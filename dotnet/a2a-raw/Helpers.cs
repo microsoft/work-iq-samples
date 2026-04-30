@@ -47,6 +47,8 @@ public static class Helpers
                     agentId = args[++i]; break;
                 case "--all-headers": allHeaders = true; break;
                 case "--show-wire": showWire = true; break;
+                case "--stream":
+                    return Err("--stream is not supported: streaming responses are coming soon to this sample. Use the sync mode (default) for now.");
                 default:
                     return Err($"Unknown flag: {args[i]}");
             }

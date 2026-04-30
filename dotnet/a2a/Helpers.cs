@@ -47,6 +47,8 @@ public static class Helpers
                     agentId = args[++i]; break;
                 case "--show-token": showToken = true; break;
                 case "--show-wire": showWire = true; break;
+                case "--stream":
+                    return Err("--stream is not supported: streaming responses are coming soon to this sample. Use the sync mode (default) for now.");
                 case "--verbosity" or "-v":
                     if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
                     if (!int.TryParse(args[++i], out verbosity))
@@ -65,18 +67,25 @@ public static class Helpers
 
     // ── Sync response extraction (A2A SDK v1.0 SendMessageResponse) ─────
 
-    public static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(SendMessageResponse response) => response.PayloadCase switch
+    public static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(SendMessageResponse response)
     {
-        SendMessageResponseCase.Message => (
-            JoinText(response.Message!.Parts),
-            response.Message.ContextId,
-            response.Message.Metadata),
-        SendMessageResponseCase.Task => (
-            ExtractTextFromTask(response.Task!),
-            response.Task.ContextId,
-            response.Task.Status.Message?.Metadata),    // citations: still in Status.Message.Metadata until DataPart migration ships
-        _ => ("(no response)", null, null),
-    };
+        switch (response.PayloadCase)
+        {
+            case SendMessageResponseCase.Message:
+            {
+                var m = response.Message!;
+                return (JoinText(m.Parts), m.ContextId, m.Metadata);
+            }
+            case SendMessageResponseCase.Task:
+            {
+                var t = response.Task!;
+                // Citations: still in Status.Message.Metadata until DataPart migration ships.
+                return (ExtractTextFromTask(t), t.ContextId, t.Status.Message?.Metadata);
+            }
+            default:
+                return ("(no response)", null, null);
+        }
+    }
 
     // The agent's answer text is delivered in Artifacts[].Parts (text parts).
     // Status.Message carries chain-of-thought / progress and metadata, not the
