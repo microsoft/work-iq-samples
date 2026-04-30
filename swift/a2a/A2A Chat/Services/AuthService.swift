@@ -20,99 +20,36 @@ class AuthService {
 
     private var application: MSALPublicClientApplication?
     private var account: MSALAccount?
-
     private let scopes: [String]
 
     init() {
-        let clientId = Self.loadClientId()
-        let redirectUri = Self.loadRedirectUri()
-        let tenantId = Self.loadTenantId() ?? "common"
-        let scopes = Self.loadScopes() ?? ["https://graph.microsoft.com/.default"]
-        self.scopes = scopes
+        let config = AppConfiguration.load()
+        self.scopes = config?.scopes ?? ["api://workiq.svc.cloud.microsoft/.default"]
 
-        guard let clientId else {
+        guard let config else {
             log.error("Configuration.plist missing or invalid")
             self.error = "Copy Configuration.example.plist to Configuration.plist and set your App ID. See README for setup instructions."
             return
         }
 
-        log.info("MSAL init — clientId: \(clientId)")
-        log.info("MSAL init — redirectUri: \(redirectUri ?? "nil")")
-        log.info("MSAL init — tenantId: \(tenantId)")
-        log.info("MSAL init — scopes: \(scopes.joined(separator: ", "))")
+        log.info("MSAL init — clientId=\(config.clientId, privacy: .public) tenant=\(config.tenantId, privacy: .public)")
 
         do {
-            let config = MSALPublicClientApplicationConfig(clientId: clientId)
-            log.info("MSAL config created")
-
-            let authorityURL = URL(string: "https://login.microsoftonline.com/\(tenantId)")!
-            config.authority = try MSALAADAuthority(url: authorityURL)
-            log.info("MSAL authority set: \(authorityURL.absoluteString)")
-
-            if let redirectUri {
-                config.redirectUri = redirectUri
+            let msalConfig = MSALPublicClientApplicationConfig(clientId: config.clientId)
+            let authorityURL = URL(string: "https://login.microsoftonline.com/\(config.tenantId)")!
+            msalConfig.authority = try MSALAADAuthority(url: authorityURL)
+            if let redirectUri = config.redirectUri {
+                msalConfig.redirectUri = redirectUri
             }
-            log.info("MSAL redirectUri set: \(config.redirectUri ?? "default")")
-
-            log.info("MSAL creating MSALPublicClientApplication...")
-            application = try MSALPublicClientApplication(configuration: config)
-            log.info("MSAL init succeeded")
+            application = try MSALPublicClientApplication(configuration: msalConfig)
         } catch let nsError as NSError {
-            log.error("MSAL init failed — domain: \(nsError.domain) code: \(nsError.code)")
-            log.error("MSAL init failed — description: \(nsError.localizedDescription)")
-            log.error("MSAL init failed — userInfo: \(nsError.userInfo.description)")
-            if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
-                log.error("MSAL init failed — underlying: domain=\(underlying.domain) code=\(underlying.code) \(underlying.localizedDescription)")
-            }
+            log.error("MSAL init failed — \(nsError.domain) \(nsError.code) \(nsError.localizedDescription)")
             self.error = "MSAL setup failed: \(nsError.domain) \(nsError.code) — \(nsError.localizedDescription)"
         }
     }
 
-    private static func loadClientId() -> String? {
-        guard let path = Bundle.main.path(forResource: "Configuration", ofType: "plist"),
-              let dict = NSDictionary(contentsOfFile: path),
-              let clientId = dict["ClientId"] as? String,
-              !clientId.isEmpty,
-              clientId != "YOUR_APP_CLIENT_ID" else {
-            return nil
-        }
-        return clientId
-    }
-
-    private static func loadRedirectUri() -> String? {
-        guard let path = Bundle.main.path(forResource: "Configuration", ofType: "plist"),
-              let dict = NSDictionary(contentsOfFile: path),
-              let uri = dict["RedirectUri"] as? String,
-              !uri.isEmpty,
-              uri != "YOUR_REDIRECT_URI" else {
-            return nil
-        }
-        return uri
-    }
-
-    private static func loadTenantId() -> String? {
-        guard let path = Bundle.main.path(forResource: "Configuration", ofType: "plist"),
-              let dict = NSDictionary(contentsOfFile: path),
-              let tenantId = dict["TenantId"] as? String,
-              !tenantId.isEmpty else {
-            return nil
-        }
-        return tenantId
-    }
-
-    private static func loadScopes() -> [String]? {
-        guard let path = Bundle.main.path(forResource: "Configuration", ofType: "plist"),
-              let dict = NSDictionary(contentsOfFile: path),
-              let scopes = dict["Scopes"] as? [String],
-              !scopes.isEmpty else {
-            return nil
-        }
-        return scopes
-    }
-
     func signIn() async {
         guard let application else {
-            log.error("signIn called but application is nil — error: \(self.error ?? "none")")
             if error == nil {
                 error = "Copy Configuration.example.plist to Configuration.plist and set your App ID. See README for setup instructions."
             }
@@ -120,45 +57,35 @@ class AuthService {
         }
 
         error = nil
-        log.info("signIn — starting interactive flow")
+
+        // Try silent first; fall back to interactive on any failure.
+        if (try? await acquireTokenSilently()) != nil {
+            log.info("signIn — silent token acquired")
+            return
+        }
+
+        guard let rootVC = Self.rootViewController() else {
+            log.error("signIn — no window scene / rootVC")
+            error = "No window available for sign-in"
+            return
+        }
+
+        let webParams = MSALWebviewParameters(authPresentationViewController: rootVC)
+        webParams.webviewType = .authenticationSession
+        webParams.prefersEphemeralWebBrowserSession = true
+        let params = MSALInteractiveTokenParameters(scopes: scopes, webviewParameters: webParams)
 
         do {
-            // Try silent first
-            if let _ = try? await acquireTokenSilently() {
-                log.info("signIn — silent token acquired")
-                return
-            }
-
-            // Interactive sign-in
-            guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                  let rootVC = windowScene.windows.first?.rootViewController else {
-                log.error("signIn — no window scene / rootVC")
-                error = "No window available for sign-in"
-                return
-            }
-
-            let webParams = MSALWebviewParameters(authPresentationViewController: rootVC)
-            webParams.webviewType = .authenticationSession
-            webParams.prefersEphemeralWebBrowserSession = true
-            let params = MSALInteractiveTokenParameters(
-                scopes: scopes,
-                webviewParameters: webParams
-            )
-            log.info("signIn — calling acquireToken (scopes: \(self.scopes.joined(separator: ", ")))")
-
             let result = try await application.acquireToken(with: params)
-            log.info("signIn — token acquired for \(result.account.username ?? "unknown")")
+            log.info("signIn — token acquired for \(result.account.username ?? "unknown", privacy: .private(mask: .hash))")
             applyResult(result)
         } catch let nsError as NSError {
-            log.error("signIn failed — domain: \(nsError.domain) code: \(nsError.code)")
-            log.error("signIn failed — \(nsError.localizedDescription)")
-            log.error("signIn failed — userInfo: \(nsError.userInfo.description)")
+            log.error("signIn failed — \(nsError.domain) \(nsError.code) \(nsError.localizedDescription)")
             self.error = nsError.localizedDescription
         }
     }
 
     func signOut() {
-        log.info("signOut")
         if let application, let account {
             try? application.remove(account)
         }
@@ -181,12 +108,11 @@ class AuthService {
         return accessToken
     }
 
+    @discardableResult
     private func acquireTokenSilently() async throws -> MSALResult? {
         guard let application, let account else { return nil }
-        log.info("acquireTokenSilently — account: \(account.username ?? "unknown")")
         let params = MSALSilentTokenParameters(scopes: scopes, account: account)
         let result = try await application.acquireTokenSilent(with: params)
-        log.info("acquireTokenSilently — success")
         applyResult(result)
         return result
     }
@@ -197,5 +123,59 @@ class AuthService {
         userName = result.account.username
         isAuthenticated = true
         error = nil
+    }
+
+    private static func rootViewController() -> UIViewController? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?
+            .windows.first?
+            .rootViewController
+    }
+}
+
+// MARK: - Configuration
+
+/// All settings loaded from `Configuration.plist` in one shot.
+/// `clientId` is required; everything else has a sensible default.
+struct AppConfiguration {
+    let clientId: String
+    let tenantId: String
+    let redirectUri: String?
+    let scopes: [String]
+    let endpoint: URL?
+
+    static func load(bundle: Bundle = .main) -> AppConfiguration? {
+        guard
+            let path = bundle.path(forResource: "Configuration", ofType: "plist"),
+            let dict = NSDictionary(contentsOfFile: path) as? [String: Any]
+        else {
+            return nil
+        }
+
+        guard let clientId = dict.nonPlaceholder("ClientId", placeholder: "YOUR_APP_CLIENT_ID") else {
+            return nil
+        }
+
+        return AppConfiguration(
+            clientId: clientId,
+            tenantId: (dict["TenantId"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "common",
+            redirectUri: dict.nonPlaceholder("RedirectUri", placeholder: "YOUR_REDIRECT_URI"),
+            scopes: (dict["Scopes"] as? [String]).flatMap { $0.isEmpty ? nil : $0 }
+                ?? ["api://workiq.svc.cloud.microsoft/.default"],
+            endpoint: dict.nonPlaceholder("Endpoint", placeholder: "YOUR_ENDPOINT_URL")
+                .flatMap(URL.init(string:))
+        )
+    }
+}
+
+private extension Dictionary where Key == String, Value == Any {
+    /// Returns the value for `key` only if it's a non-empty string and not the
+    /// listed placeholder. Otherwise nil.
+    func nonPlaceholder(_ key: String, placeholder: String) -> String? {
+        guard let value = self[key] as? String, !value.isEmpty, value != placeholder else {
+            return nil
+        }
+        return value
     }
 }

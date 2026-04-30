@@ -135,12 +135,10 @@ The developer will use these in the sample's `--appid` and `--tenant` flags.
 
 ## Sample-specific scripts (already in the repo)
 
-Two folders contain their own setup helpers for language-specific reasons:
+The unified `scripts/admin-setup.sh` above covers all four .NET samples and the Rust CLI — they all need the same Work IQ Gateway permission (`WorkIQAgent.Ask`). The two folders below contain their own setup helpers for language-specific reasons:
 
-- **`rust/a2a/setup-app-registration.sh`** — setup for the Rust device-code sample (Graph-targeted; no WAM, no redirect URIs).
-- **`swift/a2a/setup-app-registration.sh`** — Graph-targeted; adds an iOS-specific redirect URI (`msauth.app.blueglass.A2A-Chat://auth`) and generates `Configuration.plist`.
-
-The unified `scripts/admin-setup.sh` above is for the .NET samples (Work IQ Gateway). The Rust and Swift samples target Microsoft Graph and use their own scripts.
+- **`rust/a2a/setup-app-registration.sh`** — same Work IQ Gateway setup as the unified script, minus the WAM redirect URIs (Rust auth uses MSAL broker / browser PKCE / device code, not WAM redirects).
+- **`swift/a2a/setup-app-registration.sh`** — adds an iOS-specific redirect URI (`msauth.app.blueglass.A2A-Chat://auth`) and generates `Configuration.plist`. Run this **after** the unified script (or instead of, if you only need the iOS app); the iOS redirect URI is specific to the app bundle.
 
 ---
 

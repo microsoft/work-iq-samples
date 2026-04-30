@@ -10,9 +10,9 @@
     <string>common</string>
     <key>Scopes</key>
     <array>
-        <string>https://graph.microsoft.com/.default</string>
+        <string>api://workiq.svc.cloud.microsoft/.default</string>
     </array>
     <key>Endpoint</key>
-    <string>YOUR_ENDPOINT_URL</string>
+    <string>https://workiq.svc.cloud.microsoft/a2a/</string>
 </dict>
 </plist>

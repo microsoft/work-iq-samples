@@ -1,19 +1,19 @@
 use clap::{Parser, Subcommand};
 
-/// WorkIQ endpoint configuration.
-pub static WORKIQ_ENDPOINT: &str = "https://graph.microsoft.com/rp/workiq/";
-pub static WORKIQ_SCOPES: &[&str] = &["https://graph.microsoft.com/.default"];
-pub static WORKIQ_AUTHORITY: &str = "https://login.microsoftonline.com/common";
+// Work IQ Gateway — A2A endpoint multiplexed at /a2a/. Token audience is
+// the Work IQ app ID; delegated scope `WorkIQAgent.Ask` is the only one needed.
+pub const WORKIQ_ENDPOINT: &str = "https://workiq.svc.cloud.microsoft/a2a/";
+pub const WORKIQ_SCOPES: &[&str] = &["api://workiq.svc.cloud.microsoft/.default"];
+pub const WORKIQ_AUTHORITY: &str = "https://login.microsoftonline.com/common";
 
-/// Work IQ A2A CLI — Interactive A2A session via WorkIQ
-#[allow(clippy::doc_markdown)]
+/// Work IQ A2A CLI — Interactive A2A session against the Work IQ Gateway
 #[derive(Parser, Debug)]
 #[command(version, about)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
 
-    /// Auth token (JWT). Omit to use cached login or device code flow.
+    /// Auth token (JWT). Omit to use cached login or interactive sign-in.
     #[arg(long, global = true)]
     pub token: Option<String>,
 
@@ -25,7 +25,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub account: Option<String>,
 
-    /// Override default gateway endpoint
+    /// Override the gateway endpoint (full URL, e.g. https://host/a2a/)
     #[arg(long, short = 'e', global = true)]
     pub endpoint: Option<String>,
 
@@ -34,7 +34,7 @@ pub struct Cli {
     pub headers: Vec<String>,
 
     /// Enable streaming mode (SSE)
-    #[arg(long, global = true, default_value_t = false)]
+    #[arg(long, global = true)]
     pub stream: bool,
 
     /// Verbosity level (0=quiet, 1=normal, 2=wire)
@@ -42,15 +42,26 @@ pub struct Cli {
     pub verbosity: u8,
 
     /// Show raw token in output
-    #[arg(long, global = true, default_value_t = false)]
+    #[arg(long, global = true)]
     pub show_token: bool,
+
+    /// Invoke a specific agent. Fetches `{endpoint}/{agent-id}/.well-known/agent-card.json`
+    /// and POSTs to `agentCard.url`. Without this flag, posts to `--endpoint` directly
+    /// (the gateway's default agent).
+    #[arg(long, short = 'A', global = true)]
+    pub agent_id: Option<String>,
+
+    /// GET `{endpoint}/.agents` and print, then exit (no chat loop).
+    /// Useful for discovering agent IDs to pass to --agent-id.
+    #[arg(long, global = true)]
+    pub list_agents: bool,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Log in to M365 via device code flow and cache the token
+    /// Sign in interactively and cache the token
     Login,
-    /// Clear cached M365 tokens
+    /// Clear cached tokens
     Logout,
     /// Show current auth status
     Status,

@@ -1,8 +1,8 @@
 [package]
 name = "workiq-a2a"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "Work IQ A2A v0.3 CLI — Interactive A2A sessions via WorkIQ"
+description = "Work IQ A2A v1.0 CLI — Interactive A2A sessions via the Work IQ Gateway"
 license = "MIT"
 readme = "README.md"
 

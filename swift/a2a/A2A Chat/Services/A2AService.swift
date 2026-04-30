@@ -6,6 +6,9 @@
 //  client package — the rest of the app communicates through the simple
 //  `sendStreaming` / `send` / `reset()` interface.
 //
+//  Defaults to the Work IQ Gateway (`https://workiq.svc.cloud.microsoft/a2a/`).
+//  Override via the `Endpoint` key in Configuration.plist.
+//
 //  Created by Tolga Kilicli on 3/20/26.
 //
 
@@ -17,82 +20,51 @@ private let log = Logger(subsystem: "app.blueglass.A2A-Chat", category: "A2A")
 
 @Observable
 class A2AService {
+    private static let defaultEndpoint = URL(string: "https://workiq.svc.cloud.microsoft/a2a/")!
+
     private let authService: AuthService
+    private let endpoint: URL
     private var contextId: String?
-    private let endpoint: URL?
 
     init(authService: AuthService) {
         self.authService = authService
-        self.endpoint = Self.loadEndpoint()
-    }
-
-    private static func loadEndpoint() -> URL? {
-        guard let path = Bundle.main.path(forResource: "Configuration", ofType: "plist"),
-              let dict = NSDictionary(contentsOfFile: path),
-              let urlString = dict["Endpoint"] as? String,
-              !urlString.isEmpty,
-              urlString != "YOUR_ENDPOINT_URL",
-              let url = URL(string: urlString) else {
-            return nil
-        }
-        return url
+        self.endpoint = AppConfiguration.load()?.endpoint ?? Self.defaultEndpoint
     }
 
     // MARK: - Public interface
 
     /// Send a message via streaming. Calls `onText` with accumulated text as chunks arrive.
+    ///
+    /// A2A v1.0 streaming semantics:
+    ///   .task               -> initial submitted task (informational)
+    ///   .taskStatusUpdate   -> chain-of-thought OR terminal status; the final
+    ///                          event carries citation metadata
+    ///   .taskArtifactUpdate -> answer chunks (this is the answer text)
+    ///   .message            -> direct message reply (rare in this flow)
     func sendStreaming(_ text: String, onText: @escaping (String) -> Void) async throws {
-        guard let token = await authService.refreshToken() else {
-            throw URLError(.userAuthenticationRequired)
-        }
+        let client = try await makeClient()
 
-        log.info("Sending streaming message (contextId: \(self.contextId ?? "nil"))")
-
-        let client = try makeClient(token: token)
+        log.info("Sending streaming message (contextId: \(self.contextId ?? "nil", privacy: .public))")
         let stream = try await client.sendStreamingMessage(text, contextId: contextId)
 
         var accumulated = ""
 
         for try await event in stream {
             switch event {
+            case .task(let task):
+                applyContextId(task.contextId)
+                if task.isComplete { return }
+
             case .taskStatusUpdate(let update):
-                if let ctxId = update.contextId as String?, !ctxId.isEmpty {
-                    contextId = ctxId
-                }
-                if accumulated.isEmpty, let message = update.status.message {
-                    let newText = message.textContent
-                    if !newText.isEmpty {
-                        accumulated = newText
-                        onText(accumulated)
-                    }
-                }
-                if update.status.state.isTerminal {
-                    return
-                }
+                applyContextId(update.contextId)
+                if update.status.state.isTerminal { return }
 
             case .message(let message):
-                if let ctxId = message.contextId, !ctxId.isEmpty {
-                    contextId = ctxId
-                }
+                applyContextId(message.contextId)
                 let newText = message.textContent
                 if !newText.isEmpty {
                     accumulated = newText
                     onText(accumulated)
-                }
-
-            case .task(let task):
-                if !task.contextId.isEmpty {
-                    contextId = task.contextId
-                }
-                if let message = task.status.message {
-                    let newText = message.textContent
-                    if !newText.isEmpty {
-                        accumulated = newText
-                        onText(accumulated)
-                    }
-                }
-                if task.isComplete {
-                    return
                 }
 
             case .taskArtifactUpdate(let update):
@@ -109,13 +81,11 @@ class A2AService {
         }
     }
 
-    /// Non-streaming send via library.
+    /// Non-streaming send. The agent's answer text comes from
+    /// `task.artifacts[].parts`. `task.status.message` carries
+    /// chain-of-thought / progress and citation metadata, not the answer.
     func send(_ text: String) async throws -> String {
-        guard let token = await authService.refreshToken() else {
-            throw URLError(.userAuthenticationRequired)
-        }
-
-        let client = try makeClient(token: token)
+        let client = try await makeClient()
         let response = try await client.sendMessage(text, contextId: contextId)
 
         switch response {
@@ -124,7 +94,13 @@ class A2AService {
             return message.textContent
         case .task(let task):
             contextId = task.contextId
-            return task.status.message?.textContent ?? "[Task \(task.id) — \(task.state.rawValue)]"
+            let answer = task.artifacts?
+                .flatMap(\.parts)
+                .compactMap(\.text)
+                .joined(separator: "\n") ?? ""
+            return answer.isEmpty
+                ? "[Task \(task.id) — \(task.state.rawValue)]"
+                : answer
         }
     }
 
@@ -135,23 +111,23 @@ class A2AService {
 
     // MARK: - Private
 
-    private func makeClient(token: String) throws -> A2AClient {
-        guard let endpoint else {
-            throw URLError(.badURL, userInfo: [
-                NSLocalizedDescriptionKey: "Endpoint not configured. Set the Endpoint value in Configuration.plist. See README for setup instructions."
-            ])
-        }
+    private func applyContextId(_ id: String?) {
+        guard let id, !id.isEmpty else { return }
+        contextId = id
+    }
 
-        let auth = BearerTokenAuth(token: token)
+    private func makeClient() async throws -> A2AClient {
+        guard let token = await authService.refreshToken() else {
+            throw URLError(.userAuthenticationRequired)
+        }
 
         let config = A2AClientConfiguration(
             baseURL: endpoint,
             transportBinding: .jsonRPC,
-            protocolVersion: "0.3",
+            protocolVersion: "1.0",
             timeoutInterval: 300,
-            authenticationProvider: auth
+            authenticationProvider: BearerTokenAuth(token: token)
         )
-
         return A2AClient(configuration: config)
     }
 }

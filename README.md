@@ -7,16 +7,14 @@ Sample clients for the [Work IQ](https://learn.microsoft.com/en-us/microsoft-365
 | [**dotnet/a2a/**](dotnet/a2a/) | C# | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Interactive agent session using the A2A protocol over JSON-RPC |
 | [**dotnet/a2a-raw/**](dotnet/a2a-raw/) | C# | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Same, but with raw `HttpClient` + JSON (no A2A SDK) |
 | [**dotnet/rest/**](dotnet/rest/) | C# | Windows, macOS, Linux | REST | Interactive chat using the [Copilot Chat API](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview) |
-| [**rust/a2a/**](rust/a2a/) | Rust | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Interactive agent session with device code auth and token caching |
+| [**rust/a2a/**](rust/a2a/) | Rust | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Interactive agent session with MSAL auth, token caching, `--agent-id` and `--list-agents` |
 | [**swift/a2a/**](swift/a2a/) | Swift | iOS/iPadOS (macOS to build) | [A2A](https://a2a-protocol.org) | SwiftUI chat app with streaming responses |
 
 ---
 
 ## Gateway
 
-All .NET samples target the **Work IQ Gateway** (`workiq.svc.cloud.microsoft`) — the dedicated entry point for Work IQ and Copilot Chat. Token audience: `api://workiq.svc.cloud.microsoft`; delegated scope: `WorkIQAgent.Ask`.
-
-> The Rust and Swift samples in this repo target Microsoft Graph today and have not been migrated yet.
+All samples target the **Work IQ Gateway** (`workiq.svc.cloud.microsoft`) — the dedicated entry point for Work IQ and Copilot Chat. Token audience: `api://workiq.svc.cloud.microsoft`; delegated scope: `WorkIQAgent.Ask`.
 
 ---
 
@@ -65,12 +63,13 @@ dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
 
 > **Note:** WAM is only available on Windows. On macOS and Linux, MSAL falls back to an interactive browser sign-in using the `http://localhost` redirect URI — same command works.
 
-### Device code flow — Rust, Swift
+### MSAL flows — Rust, Swift
+
+The Rust CLI tries silent → broker (macOS Enterprise SSO / Windows WAM) → browser PKCE → device code, in that order. The Swift app uses MSAL silent + interactive (system browser) on iOS.
 
 ```bash
 cd rust/a2a
 cargo run -- --appid <APP_ID>
-# Follow the on-screen instructions to authenticate in a browser.
 ```
 
 ### Pre-obtained JWT token — all platforms, all samples
