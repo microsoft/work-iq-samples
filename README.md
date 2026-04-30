@@ -25,6 +25,7 @@ All .NET samples target the **Work IQ Gateway** (`workiq.svc.cloud.microsoft`) â
    - **dotnet/** samples: [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later
    - **rust/** samples: [Rust toolchain](https://rustup.rs/) (stable)
    - **swift/** samples: [Xcode 26+](https://developer.apple.com/xcode/) (macOS only)
+
 ### App registration setup
 
 You (or your tenant admin) must create an Entra app registration with specific permissions, redirect URIs, and consent. This is a ~5-minute task.
@@ -55,7 +56,7 @@ All samples support multiple authentication methods. Choose the one that fits yo
 Uses the Windows broker for silent SSO. A browser-less sign-in popup appears on first use; subsequent calls in the same process are silent. Across `dotnet run` invocations you'll be re-prompted (the samples don't persist MSAL state across processes by default).
 
 ```bash
-cd dotnet/rest
+cd dotnet/a2a
 dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
 ```
 
