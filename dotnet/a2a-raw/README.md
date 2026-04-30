@@ -43,9 +43,7 @@ dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
 
 Type a message, see a response, type `quit` to exit.
 
-### Streaming mode
-
-Add `--stream` to switch from `SendMessage` to `SendStreamingMessage`.
+> **Streaming responses are coming soon** and not yet supported by this sample.
 
 ### Invoking a specific agent (`--agent-id`)
 
@@ -62,14 +60,11 @@ The sample then does **two raw HTTP calls** — illustrating exactly what a non-
    GET {endpoint}/{agent-id}/.well-known/agent-card.json
    Authorization: Bearer <token>
    ```
-   Response is the standard A2A agent card JSON. The sample parses three fields:
+   Response is the standard A2A agent card JSON. The sample parses two fields:
    - `url` — where to POST messages for this agent
    - `name` — friendly name (for logging)
-   - `capabilities.streaming` — whether `SendStreamingMessage` is supported
 
 2. **Message post** — same JSON-RPC shape as before, but POSTed to `agentCard.url` (read from step 1) instead of the gateway A2A endpoint.
-
-If `--stream` is set but the agent's card has `capabilities.streaming = false`, the sample falls back to `SendMessage` automatically and prints a note.
 
 #### Agent card wire format (what the GET returns)
 
@@ -142,8 +137,7 @@ You > quit
 | `--tenant, -T` | Tenant ID or domain. Required with `WAM` for single-tenant apps; defaults to `common` for multi-tenant. |
 | `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
 | `--agent-id, -A` | Invoke a specific agent (fetches `.well-known/agent-card.json` and POSTs to `agentCard.url`). See [How to find an agent ID](#how-to-find-an-agent-id) above. |
-| `--show-wire` | Pretty-print raw JSON-RPC request/response bodies and each streaming SSE `data:` event as it arrives. Useful for protocol debugging. |
-| `--stream` | Use streaming mode (`SendStreamingMessage` via SSE) |
+| `--show-wire` | Pretty-print raw JSON-RPC request/response bodies. Useful for protocol debugging. |
 | `--all-headers` | Print every response header (default: only diagnostic ones) |
 
 ## What goes over the wire
@@ -191,30 +185,17 @@ Response is a JSON-RPC envelope with `result.task` containing the agent's task a
 }
 ```
 
-### Streaming: `POST` with method `SendStreamingMessage`
+### Streaming responses
 
-Same JSON-RPC request with `"method": "SendStreamingMessage"`. Response is `text/event-stream` (SSE) where each event is a JSON-RPC response carrying one of `task`, `statusUpdate`, `artifactUpdate`, or `message`:
-
-```
-data: {"jsonrpc":"2.0","id":"...","result":{"statusUpdate":{"taskId":"<t>","contextId":"ctx-1","status":{"state":"TASK_STATE_WORKING"}}}}
-data: {"jsonrpc":"2.0","id":"...","result":{"artifactUpdate":{"taskId":"<t>","contextId":"ctx-1","artifact":{"artifactId":"<a>","parts":[{"text":"You"}]}}}}
-data: {"jsonrpc":"2.0","id":"...","result":{"artifactUpdate":{"taskId":"<t>","contextId":"ctx-1","artifact":{"artifactId":"<a>","parts":[{"text":"You have 3 meetings..."}]}}}}
-data: {"jsonrpc":"2.0","id":"...","result":{"statusUpdate":{"taskId":"<t>","contextId":"ctx-1","status":{"state":"TASK_STATE_COMPLETED"}}}}
-```
-
-### Streaming mode: Full (cumulative) vs Delta
-
-The sample sets `metadata.StreamingMode = "Full"` on the outgoing message. In Full mode each `artifactUpdate.artifact.parts[0].text` carries the **full cumulative answer text** with `append: false` (replace). The sample renders this as a delta by writing only the new suffix on each event.
-
-The default mode is `"Delta"` — each `artifactUpdate` would carry just the new tail with `append: true`. Delta mode currently drops chunks at sentence/paragraph boundaries on the Work IQ Gateway (a server-side fix is in flight), so this sample opts into Full mode for now. The opt-in will be removed once Delta mode is back to correct behavior.
+Streaming (`SendStreamingMessage` over SSE) is **coming soon** and not yet supported by this sample.
 
 ### Key v1.0 protocol details
 
 - **JSON-RPC envelope required** — every request must include `jsonrpc`, `id`, `method`, `params`.
-- **POST to base URL** — the method (`SendMessage`, `SendStreamingMessage`) is inside the body, not in the URL path.
+- **POST to base URL** — the method (`SendMessage`) is inside the body, not in the URL path.
 - **No `kind` discriminators** — parts are flat objects with field-presence (`{"text": "..."}` not `{"kind": "text", "text": "..."}`).
 - **PROTOJSON enums** — roles use `ROLE_USER` / `ROLE_AGENT`; states use `TASK_STATE_WORKING` / `TASK_STATE_COMPLETED` / `TASK_STATE_FAILED` / etc.
-- **Named result wrappers** — sync responses carry `result.task` or `result.message`; streaming events use `result.statusUpdate`, `result.artifactUpdate`, `result.task`, or `result.message`.
+- **Named result wrappers** — sync responses carry `result.task` or `result.message`.
 - **Backward compatibility** — set the `A2A-Version: 0.3` request header to opt back into the v0.3 wire format.
 
 ## NuGet dependencies

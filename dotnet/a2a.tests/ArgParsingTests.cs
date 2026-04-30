@@ -15,11 +15,10 @@ public class ArgParsingTests
     [Fact]
     public void ValidArgs_ProduceCorrectConfig()
     {
-        var r = Helpers.ParseArgs(["--token", "mytoken", "--appid", "app1", "--stream"]);
+        var r = Helpers.ParseArgs(["--token", "mytoken", "--appid", "app1"]);
         Assert.Null(r.Error);
         Assert.Equal("mytoken", r.Token);
         Assert.Equal("app1", r.AppId);
-        Assert.True(r.Stream);
     }
 
     [Fact]

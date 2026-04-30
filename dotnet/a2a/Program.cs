@@ -46,7 +46,6 @@ var httpClient = CreateHttpClient(token, config.Gateway);
 //   --agent-id set:     fetch the agent card from {gateway}/{agentId}/.well-known/agent-card.json
 //                       (handled by A2ACardResolver) and use agentCard.Url as the A2A endpoint.
 string a2aEndpoint = config.Gateway.Endpoint;
-bool effectiveStream = config.Stream;
 if (!string.IsNullOrEmpty(config.AgentId))
 {
     var gateway = config.Gateway.Endpoint.TrimEnd('/');
@@ -63,12 +62,6 @@ if (!string.IsNullOrEmpty(config.AgentId))
     // v1.0: AgentCard.Url is gone; the URL lives in SupportedInterfaces[].Url.
     var resolvedUrl = agentCard.SupportedInterfaces.FirstOrDefault()?.Url ?? config.Gateway.Endpoint;
     a2aEndpoint = resolvedUrl;
-    var streamingSupported = agentCard.Capabilities.Streaming == true;
-    if (config.Stream && !streamingSupported)
-    {
-        if (config.Verbosity >= 1) Ink($"  note: agent '{agentCard.Name}' does not advertise streaming; falling back to sync\n", ConsoleColor.DarkYellow);
-        effectiveStream = false;
-    }
 
     if (config.Verbosity >= 1)
     {
@@ -76,7 +69,6 @@ if (!string.IsNullOrEmpty(config.AgentId))
         Console.WriteLine($"  id              {config.AgentId}");
         Console.WriteLine($"  name            {agentCard.Name}");
         Console.WriteLine($"  url             {resolvedUrl}");
-        Console.WriteLine($"  streaming       {streamingSupported}");
     }
 }
 
@@ -85,7 +77,7 @@ string? contextId = null;
 
 if (config.Verbosity >= 1)
 {
-    Log($"READY — {config.Gateway.Name} — {(effectiveStream ? "Streaming" : "Sync")} — {a2aEndpoint}");
+    Log($"READY — {config.Gateway.Name} — {a2aEndpoint}");
     Console.WriteLine("Type a message. 'quit' to exit.\n");
 }
 
@@ -121,174 +113,19 @@ while (true)
             Metadata = new Dictionary<string, JsonElement>
             {
                 ["Location"] = JsonSerializer.SerializeToElement(new { timeZoneOffset = (int)TimeZoneInfo.Local.BaseUtcOffset.TotalMinutes, timeZone = TimeZoneInfo.Local.Id }),
-
-                // Opt the streaming response into "Full" mode. In Full mode each
-                // ArtifactUpdate carries the full cumulative answer text with
-                // Append=false (replace). The default "Delta" mode currently has
-                // a known issue on the Work IQ Gateway where chunks can be
-                // dropped at sentence/paragraph boundaries; Full mode is not
-                // affected. Remove this opt-in once the Delta path is fixed.
-                ["StreamingMode"] = JsonSerializer.SerializeToElement("Full"),
             },
         };
 
         var sw = Stopwatch.StartNew();
         Dictionary<string, JsonElement>? responseMetadata = null;
 
-        if (effectiveStream)
-        {
-            // A2A v1.0 streaming semantics:
-            //   - Task         : initial submitted state — informational only.
-            //   - StatusUpdate : chain-of-thought / progress messages OR the
-            //                    terminal state (Completed/Failed/...). The
-            //                    final StatusUpdate carries citation metadata
-            //                    in Status.Message.Metadata; its Parts are
-            //                    typically empty and never the "answer".
-            //   - ArtifactUpdate : the answer, streamed in chunks. Each event
-            //                    carries one or more parts and an Append flag:
-            //                      Append=true  -> append parts to the
-            //                        artifact identified by ArtifactId
-            //                      Append=false -> replace the artifact
-            //                        identified by ArtifactId.
-            //                    The full answer is the concatenation of all
-            //                    Append=true parts (with replaces applied) for
-            //                    each ArtifactId.
-            var artifactBuffers = new Dictionary<string, StringBuilder>();
-            var lastChainOfThought = string.Empty;
-
-            await foreach (var evt in a2a.SendStreamingMessageAsync(new SendMessageRequest { Message = msg }))
-            {
-                if (config.ShowWire) PrintStreamEvent(evt);
-
-                switch (evt.PayloadCase)
-                {
-                    case StreamResponseCase.Task:
-                    {
-                        contextId = evt.Task!.ContextId;
-                        if (config.Verbosity >= 2)
-                            Ink($"  [task {ShortId(evt.Task.Id)} {evt.Task.Status.State}]\n", ConsoleColor.DarkGray);
-                        break;
-                    }
-                    case StreamResponseCase.StatusUpdate:
-                    {
-                        var su = evt.StatusUpdate!;
-                        if (config.Verbosity >= 2)
-                            Ink($"  [{su.Status.State}]\n", ConsoleColor.DarkGray);
-
-                        if (su.Status.Message is { } statusMsg)
-                        {
-                            contextId = statusMsg.ContextId;
-                            responseMetadata = statusMsg.Metadata;
-
-                            // Chain-of-thought: print once per unique progress line,
-                            // in gray, on its own line. Skipped for the terminal
-                            // event whose Parts are typically empty.
-                            var thought = Helpers.JoinText(statusMsg.Parts);
-                            if (!string.IsNullOrEmpty(thought) && thought != lastChainOfThought)
-                            {
-                                spinner.Stop();
-                                Ink($"  [{thought}]\n", ConsoleColor.DarkGray);
-                                lastChainOfThought = thought;
-                            }
-                        }
-
-                        if (IsTerminal(su.Status.State))
-                        {
-                            spinner.Stop();
-                            sw.Stop();
-                            Console.WriteLine();
-                            goto streaming_done;
-                        }
-                        break;
-                    }
-                    case StreamResponseCase.ArtifactUpdate:
-                    {
-                        var au = evt.ArtifactUpdate!;
-                        var aId = au.Artifact.ArtifactId;
-                        if (!artifactBuffers.TryGetValue(aId, out var sb))
-                        {
-                            sb = new StringBuilder();
-                            artifactBuffers[aId] = sb;
-                        }
-
-                        var chunk = Helpers.JoinText(au.Artifact.Parts);
-
-                        if (au.Append)
-                        {
-                            // Delta semantics: chunk is the new tail.
-                            sb.Append(chunk);
-                            if (chunk.Length > 0)
-                            {
-                                spinner.Stop();
-                                Console.Write(chunk);
-                            }
-                        }
-                        else
-                        {
-                            // Replace semantics: chunk is the full new artifact text.
-                            // Work IQ's Full streaming mode sends each event as a
-                            // strict prefix-extension of the previous, so we print
-                            // only the new suffix (terminals can't un-write).
-                            var oldText = sb.ToString();
-                            sb.Clear();
-                            sb.Append(chunk);
-
-                            string toWrite;
-                            if (chunk.StartsWith(oldText, StringComparison.Ordinal))
-                            {
-                                toWrite = chunk[oldText.Length..];
-                            }
-                            else
-                            {
-                                // Defensive: replacement isn't an extension. Newline
-                                // and reprint, so the user can see the new content.
-                                if (oldText.Length > 0) Console.WriteLine();
-                                toWrite = chunk;
-                            }
-
-                            if (toWrite.Length > 0)
-                            {
-                                spinner.Stop();
-                                Console.Write(toWrite);
-                            }
-                        }
-
-                        // Per-chunk markers are too noisy at -v 2 (the gateway can
-                        // emit very small chunks, fragmenting the streamed answer).
-                        // Show them only with --show-wire alongside the raw event JSON.
-                        if (config.ShowWire)
-                            Ink($"  [artifact {ShortId(aId)} +{chunk.Length}c{(au.LastChunk ? " LAST" : "")}]\n", ConsoleColor.DarkGray);
-                        break;
-                    }
-                    case StreamResponseCase.Message:
-                    {
-                        contextId = evt.Message!.ContextId;
-                        responseMetadata = evt.Message.Metadata;
-                        var text = Helpers.JoinText(evt.Message.Parts);
-                        if (text.Length > 0)
-                        {
-                            spinner.Stop();
-                            Console.Write(text);
-                        }
-                        break;
-                    }
-                }
-            }
-
-            sw.Stop();
-            Console.WriteLine();
-            streaming_done:;
-        }
-        else
-        {
-            var response = await a2a.SendMessageAsync(new SendMessageRequest { Message = msg });
-            sw.Stop();
-            spinner.Stop();
-            var (text, ctx, meta) = Extract(response);
-            contextId = ctx;
-            responseMetadata = meta;
-            Console.WriteLine(text);
-        }
+        var response = await a2a.SendMessageAsync(new SendMessageRequest { Message = msg });
+        sw.Stop();
+        spinner.Stop();
+        var (text, ctx, meta) = Extract(response);
+        contextId = ctx;
+        responseMetadata = meta;
+        Console.WriteLine(text);
 
         if (config.Verbosity >= 1) Ink($"  ({sw.ElapsedMilliseconds} ms)\n", ConsoleColor.DarkGray);
 
@@ -310,11 +147,6 @@ while (true)
 static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(SendMessageResponse response)
     => WorkIQ.A2A.Helpers.Extract(response);
 
-static bool IsTerminal(TaskState state) =>
-    state == TaskState.Completed || state == TaskState.Failed || state == TaskState.Canceled || state == TaskState.Rejected;
-
-static string ShortId(string id) => id.Length > 8 ? id[..8] : id;
-
 static HttpClient CreateHttpClient(string bearerToken, GatewayConfig gw)
 {
     var client = new HttpClient(new WireLog { InnerHandler = new HttpClientHandler() }) { Timeout = TimeSpan.FromMinutes(5) };
@@ -326,40 +158,6 @@ static HttpClient CreateHttpClient(string bearerToken, GatewayConfig gw)
     }
 
     return client;
-}
-
-// Prints each parsed streaming event as JSON. The A2A SDK has already consumed
-// the raw `data:` line by the time we get here, so we re-serialize the parsed
-// StreamResponse payload back to JSON. The visible JSON shape matches what the
-// server sent inside `result` (the SDK strips the outer `{jsonrpc, id, result}`
-// envelope during parsing).
-static void PrintStreamEvent(StreamResponse evt)
-{
-    object? data = evt.PayloadCase switch
-    {
-        StreamResponseCase.Task => evt.Task,
-        StreamResponseCase.Message => evt.Message,
-        StreamResponseCase.StatusUpdate => evt.StatusUpdate,
-        StreamResponseCase.ArtifactUpdate => evt.ArtifactUpdate,
-        _ => null,
-    };
-    if (data is null) return;
-
-    string json;
-    try
-    {
-        json = JsonSerializer.Serialize(data, new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-        });
-    }
-    catch (Exception ex) { json = $"(serialize failed: {ex.Message})"; }
-
-    Console.ForegroundColor = ConsoleColor.DarkGray;
-    Console.WriteLine($"\n  ← data ({evt.PayloadCase}):");
-    foreach (var line in json.Split('\n')) Console.WriteLine($"      {line}");
-    Console.ResetColor();
 }
 
 // ── WAM auth ─────────────────────────────────────────────────────────────
@@ -450,7 +248,7 @@ static Config? ParseArgs(string[] args)
     }
 
     string? token = a.Token, appId = a.AppId, endpoint = a.Endpoint, account = a.Account, tenant = a.Tenant, agentId = a.AgentId;
-    bool showToken = a.ShowToken, stream = a.Stream, showWire = a.ShowWire;
+    bool showToken = a.ShowToken, showWire = a.ShowWire;
     int verbosity = a.Verbosity;
     var headers = a.Headers;
 
@@ -476,10 +274,11 @@ static Config? ParseArgs(string[] args)
                                default BizChat agent).
               --header, -H     Custom HTTP header in 'Key: Value' format (repeatable)
               --show-token     Print the raw JWT token (for reuse with --token)
-              --stream         Use streaming mode (SSE via message/stream)
-              --show-wire      Pretty-print raw JSON-RPC request/response bodies (and streaming
-                               SSE events). Independent of --verbosity.
+              --show-wire      Pretty-print raw JSON-RPC request/response bodies.
+                               Independent of --verbosity.
               -v, --verbosity  0 = response only, 1 = default, 2 = wire diagnostics
+
+            Note: streaming responses are coming soon and not yet supported by this sample.
 
             Examples:
               dotnet run -- --token WAM --appid <your-app-id> --tenant <your-tenant>
@@ -510,7 +309,7 @@ static Config? ParseArgs(string[] args)
         gw = gw with { ExtraHeaders = [.. gw.ExtraHeaders, .. headers] };
     }
 
-    return new Config(token, appId ?? "", gw, account, tenant, agentId, showToken, verbosity, stream, showWire);
+    return new Config(token, appId ?? "", gw, account, tenant, agentId, showToken, verbosity, showWire);
 }
 
 // ── Citations ─────────────────────────────────────────────────────────────
@@ -569,7 +368,7 @@ static void Ink(string s, ConsoleColor c) { Console.ForegroundColor = c; Console
 [DllImport("user32.dll", ExactSpelling = true)] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
 static IntPtr ConsoleWindowHandle() { var c = Win32GetConsoleWindow(); var r = GetAncestor(c, 3); return r != IntPtr.Zero ? r : c; }
 
-record Config(string Token, string AppId, GatewayConfig Gateway, string? Account, string? Tenant, string? AgentId, bool ShowToken, int Verbosity, bool Stream, bool ShowWire);
+record Config(string Token, string AppId, GatewayConfig Gateway, string? Account, string? Tenant, string? AgentId, bool ShowToken, int Verbosity, bool ShowWire);
 
 // ── Gateway definitions ──────────────────────────────────────────────────
 
@@ -636,7 +435,6 @@ class WireLog : DelegatingHandler
         catch (Exception ex) { Ink($"  ◀ ERROR: {ex.Message}\n", ConsoleColor.Red); throw; }
 
         var contentType = res.Content?.Headers.ContentType?.MediaType;
-        var isStreaming = string.Equals(contentType, "text/event-stream", StringComparison.OrdinalIgnoreCase);
 
         if (Verbosity >= 2 || ShowWire)
         {
@@ -654,13 +452,7 @@ class WireLog : DelegatingHandler
             {
                 Console.WriteLine($"    Body: {Trunc(await res.Content.ReadAsStringAsync(ct), 1000)}");
             }
-            // For streaming responses, do NOT read the body here (would block until stream closes).
-            // The streaming consumer in the main loop logs each SSE event when --show-wire is set.
-            else if (ShowWire && isStreaming)
-            {
-                Console.WriteLine($"    (streaming response — see SSE events below)");
-            }
-            // For non-streaming JSON success responses, pretty-print the full body when --show-wire.
+            // Pretty-print the full body when --show-wire.
             else if (ShowWire && IsJson(contentType) && res.Content != null)
             {
                 var text = await res.Content.ReadAsStringAsync(ct);

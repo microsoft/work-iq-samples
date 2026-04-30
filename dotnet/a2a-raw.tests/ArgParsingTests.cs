@@ -15,12 +15,11 @@ public class ArgParsingTests
     [Fact]
     public void ValidArgs_AllParsedCorrectly()
     {
-        var r = Helpers.ParseArgs(["--endpoint", "https://example.com", "--token", "abc", "--appid", "id1", "--stream"]);
+        var r = Helpers.ParseArgs(["--endpoint", "https://example.com", "--token", "abc", "--appid", "id1"]);
         Assert.Null(r.Error);
         Assert.Equal("https://example.com", r.Endpoint);
         Assert.Equal("abc", r.Token);
         Assert.Equal("id1", r.AppId);
-        Assert.True(r.Stream);
     }
 
     [Fact]
@@ -138,12 +137,4 @@ public class ArgParsingTests
         Assert.False(r.ShowWire);
     }
 
-    [Fact]
-    public void ShowWire_CombinesWithStream()
-    {
-        var r = Helpers.ParseArgs(["-e", "https://example.com", "-t", "tok", "--show-wire", "--stream"]);
-        Assert.Null(r.Error);
-        Assert.True(r.ShowWire);
-        Assert.True(r.Stream);
-    }
 }

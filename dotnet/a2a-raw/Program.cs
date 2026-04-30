@@ -7,7 +7,7 @@
 // Targets the Work IQ Gateway (`https://workiq.svc.cloud.microsoft/a2a/`).
 //
 // Usage:
-//   dotnet run -- --token <JWT|WAM> --appid <client-id> [--account user@tenant.com] [--stream]
+//   dotnet run -- --token <JWT|WAM> --appid <client-id> [--account user@tenant.com]
 
 using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
@@ -32,7 +32,7 @@ if (parsed.Error != null)
 string endpoint = parsed.Endpoint ?? "https://workiq.svc.cloud.microsoft/a2a/";
 string scope = parsed.Scope ?? "api://workiq.svc.cloud.microsoft/.default";
 string? token = parsed.Token, appId = parsed.AppId, account = parsed.Account, tenant = parsed.Tenant, agentId = parsed.AgentId;
-bool stream = parsed.Stream, allHeaders = parsed.AllHeaders, showWire = parsed.ShowWire;
+bool allHeaders = parsed.AllHeaders, showWire = parsed.ShowWire;
 
 if (string.IsNullOrEmpty(token))
 {
@@ -65,8 +65,8 @@ var http = new HttpClient();
 http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 // Opt in to A2A v1.0 wire format. Without this header, the server defaults
-// to the v0.3 dispatcher and v1.0 method names ("SendMessage" /
-// "SendStreamingMessage") return JSON-RPC -32601 "Method not found".
+// to the v0.3 dispatcher and the v1.0 method name "SendMessage" returns
+// JSON-RPC -32601 "Method not found".
 http.DefaultRequestHeaders.TryAddWithoutValidation("A2A-Version", "1.0");
 
 // ── Agent card resolution (when --agent-id is set) ───────────────────────
@@ -74,7 +74,7 @@ http.DefaultRequestHeaders.TryAddWithoutValidation("A2A-Version", "1.0");
 // This sample deliberately does the agent-card fetch in raw HTTP + JSON to
 // show what the wire interaction looks like. With --agent-id the sample:
 //   1. GET {endpoint}/{agentId}/.well-known/agent-card.json
-//   2. Parse the JSON to find:   url, name, capabilities.streaming
+//   2. Parse the JSON to find:   url, name
 //   3. Replace the POST target with agentCard.url
 //
 // Without --agent-id the sample posts directly to the gateway endpoint
@@ -98,20 +98,11 @@ if (!string.IsNullOrEmpty(agentId))
         var resolvedUrl = root.GetProperty("url").GetString()
             ?? throw new InvalidOperationException("agent-card.json has no 'url' field");
         var resolvedName = root.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-        var streamingSupported = root.TryGetProperty("capabilities", out var caps)
-            && caps.TryGetProperty("streaming", out var s) && s.GetBoolean();
 
         Console.WriteLine($"Agent card:");
         Console.WriteLine($"  id              {agentId}");
         Console.WriteLine($"  name            {resolvedName}");
         Console.WriteLine($"  url             {resolvedUrl}");
-        Console.WriteLine($"  streaming       {streamingSupported}");
-
-        if (stream && !streamingSupported)
-        {
-            Console.WriteLine("  note: agent does not advertise streaming; falling back to sync");
-            stream = false;
-        }
 
         endpoint = resolvedUrl;
     }
@@ -125,7 +116,6 @@ if (!string.IsNullOrEmpty(agentId))
 string? contextId = null;
 
 Console.WriteLine($"Connected to: {endpoint}");
-Console.WriteLine($"Mode: {(stream ? "streaming (SendStreamingMessage)" : "sync (SendMessage)")}");
 Console.WriteLine("Type a message. 'quit' to exit.\n");
 
 // ── Chat loop ────────────────────────────────────────────────────────────
@@ -194,23 +184,15 @@ while (true)
             ["metadata"] = new Dictionary<string, object>
             {
                 ["Location"] = new { timeZoneOffset = (int)TimeZoneInfo.Local.BaseUtcOffset.TotalMinutes, timeZone = TimeZoneInfo.Local.Id },
-
-                // Opt the streaming response into "Full" mode. In Full mode each
-                // ArtifactUpdate carries the full cumulative answer text with
-                // append=false (replace). The default "Delta" mode currently has
-                // a known issue on the Work IQ Gateway where chunks can be
-                // dropped at sentence/paragraph boundaries; Full mode is not
-                // affected. Remove this opt-in once the Delta path is fixed.
-                ["StreamingMode"] = "Full",
             },
         };
 
-        // Wrap in JSON-RPC envelope — v1.0 method names: SendMessage / SendStreamingMessage.
+        // Wrap in JSON-RPC envelope — v1.0 method name: SendMessage.
         var jsonRpcRequest = new
         {
             jsonrpc = "2.0",
             id = Guid.NewGuid().ToString(),
-            method = stream ? "SendStreamingMessage" : "SendMessage",
+            method = "SendMessage",
             @params = new { message },
         };
 
@@ -219,14 +201,7 @@ while (true)
 
         if (showWire) PrintWireBody("▶ POST request", json);
 
-        if (stream)
-        {
-            await StreamResponse(http, endpoint, content, spinnerCts, spinnerTask, showWire);
-        }
-        else
-        {
-            await SyncResponse(http, endpoint, content, spinnerCts, spinnerTask, showWire);
-        }
+        await SyncResponse(http, endpoint, content, spinnerCts, spinnerTask, showWire);
     }
     catch (Exception ex)
     {
@@ -298,164 +273,18 @@ async Task SyncResponse(HttpClient client, string ep, HttpContent body, Cancella
     }
 }
 
-// Walks a v1.0 `result` envelope for the contextId. v1.0 places contextId on
-// task / message / statusUpdate / artifactUpdate directly.
+// Walks a v1.0 sync `result` envelope for the contextId. v1.0 places contextId
+// on result.task or result.message.
 static string? ExtractContextId(JsonElement el)
 {
     static string? Get(JsonElement e) => e.TryGetProperty("contextId", out var c) ? c.GetString() : null;
 
-    foreach (var key in new[] { "task", "message", "statusUpdate", "artifactUpdate" })
+    foreach (var key in new[] { "task", "message" })
     {
         if (el.TryGetProperty(key, out var inner) && Get(inner) is { } id)
             return id;
     }
     return Get(el);
-}
-
-// ── Streaming: POST to base URL with method "SendStreamingMessage" (SSE) ──
-
-async Task StreamResponse(HttpClient client, string ep, HttpContent body, CancellationTokenSource spinCts, Task spinTask, bool showWire)
-{
-    // v1.0: POST to the base URL — method (`SendStreamingMessage`) is inside the JSON-RPC body.
-    var request = new HttpRequestMessage(HttpMethod.Post, ep) { Content = body };
-    request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-
-    var res = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-
-    // Stop spinner now that we have a response
-    spinCts.Cancel();
-    try { await spinTask; } catch { }
-
-    PrintResponseHeaders(res);
-
-    if (!res.IsSuccessStatusCode)
-    {
-        var errBody = await res.Content.ReadAsStringAsync();
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"  {errBody}");
-        Console.ResetColor();
-        return;
-    }
-
-    var responseStream = await res.Content.ReadAsStreamAsync();
-    using var reader = new StreamReader(responseStream);
-
-    // A2A v1.0 streaming semantics:
-    //   result.task            -> initial submitted task (informational)
-    //   result.statusUpdate    -> chain-of-thought OR terminal status; the
-    //                             final event carries citation metadata
-    //   result.artifactUpdate  -> answer chunks. Each event has an `append`
-    //                             flag: true => append parts to the artifact
-    //                             identified by artifactId; false => replace.
-    //                             The full answer is the concatenation of all
-    //                             append=true parts (with replaces applied).
-    //   result.message         -> direct message reply (rare in this flow)
-    var artifactBuffers = new Dictionary<string, StringBuilder>();
-    var lastChainOfThought = "";
-
-    while (!reader.EndOfStream)
-    {
-        var line = await reader.ReadLineAsync();
-        if (line == null) break;
-
-        // SSE format: lines starting with "data:" contain JSON-RPC responses
-        if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
-        var data = line["data:".Length..].Trim();
-        if (string.IsNullOrEmpty(data)) continue;
-
-        if (showWire) PrintWireBody("← SSE data", data);
-
-        try
-        {
-            using var doc = JsonDocument.Parse(data);
-
-            // Unwrap JSON-RPC: get the "result" field
-            JsonElement payload;
-            if (doc.RootElement.TryGetProperty("result", out var result))
-                payload = result;
-            else
-                payload = doc.RootElement;
-
-            // Extract contextId (v1.0: lives on task/message/statusUpdate/artifactUpdate)
-            contextId = ExtractContextId(payload) ?? contextId;
-
-            // Dispatch on event shape.
-            if (payload.TryGetProperty("artifactUpdate", out var au))
-            {
-                if (au.TryGetProperty("artifact", out var artifact))
-                {
-                    var aId = artifact.TryGetProperty("artifactId", out var aIdProp) ? aIdProp.GetString() ?? "" : "";
-                    var append = au.TryGetProperty("append", out var ap) && ap.ValueKind == JsonValueKind.True;
-
-                    if (Helpers.TryGetParts(artifact, out var chunk))
-                    {
-                        if (!artifactBuffers.TryGetValue(aId, out var sb))
-                        {
-                            sb = new StringBuilder();
-                            artifactBuffers[aId] = sb;
-                        }
-
-                        if (append)
-                        {
-                            // Delta semantics: chunk is the new tail.
-                            sb.Append(chunk);
-                            Console.Write(chunk);
-                        }
-                        else
-                        {
-                            // Replace semantics: chunk is the full new artifact text.
-                            // Work IQ's Full streaming mode sends each event as a
-                            // strict prefix-extension of the previous, so we print
-                            // only the new suffix (terminals can't un-write).
-                            var oldText = sb.ToString();
-                            sb.Clear();
-                            sb.Append(chunk);
-
-                            string toWrite;
-                            if (chunk.StartsWith(oldText, StringComparison.Ordinal))
-                            {
-                                toWrite = chunk[oldText.Length..];
-                            }
-                            else
-                            {
-                                // Defensive: replacement isn't an extension.
-                                if (oldText.Length > 0) Console.WriteLine();
-                                toWrite = chunk;
-                            }
-
-                            if (toWrite.Length > 0) Console.Write(toWrite);
-                        }
-                    }
-                }
-            }
-            else if (payload.TryGetProperty("statusUpdate", out var su))
-            {
-                // Chain-of-thought / progress message (gray, on its own line),
-                // OR terminal state (just signals end of stream).
-                if (su.TryGetProperty("status", out var status))
-                {
-                    if (status.TryGetProperty("message", out var statusMsg) &&
-                        Helpers.TryGetParts(statusMsg, out var thought) &&
-                        thought != lastChainOfThought)
-                    {
-                        Console.ForegroundColor = ConsoleColor.DarkGray;
-                        Console.WriteLine($"\n  [{thought}]");
-                        Console.ResetColor();
-                        lastChainOfThought = thought;
-                    }
-                }
-            }
-            else if (payload.TryGetProperty("message", out var m) &&
-                     Helpers.TryGetParts(m, out var msgText))
-            {
-                Console.Write(msgText);
-            }
-            // result.task -> initial; nothing to print at default verbosity.
-        }
-        catch { /* skip unparseable SSE events */ }
-    }
-
-    Console.WriteLine();
 }
 
 // ── WAM auth ─────────────────────────────────────────────────────────────
@@ -585,21 +414,19 @@ void PrintUsage()
       --account        Account hint (e.g., user@contoso.com)
       --tenant, -T     Tenant ID or domain (required with WAM for single-tenant apps;
                        defaults to 'common' for multi-tenant apps)
-      --stream         Use streaming mode (SSE via message/stream)
       --all-headers    Print all response headers (default: key diagnostics only)
-      --show-wire      Pretty-print raw JSON-RPC request/response bodies (and each
-                       streaming SSE `data:` event as it arrives).
+      --show-wire      Pretty-print raw JSON-RPC request/response bodies.
 
     Examples:
       # Work IQ Gateway (uses defaults)
       dotnet run -- -t WAM -a <appid>
 
-      # List agents (discover IDs to use with --agent-id)
-
       # Invoke a specific agent
       dotnet run -- -t WAM -a <appid> --agent-id <AGENT_ID>
 
       # With a pre-obtained JWT
-      dotnet run -- -t eyJ0eXAi... --stream
+      dotnet run -- -t eyJ0eXAi...
+
+    Note: streaming responses are coming soon and not yet supported by this sample.
     """);
 }
