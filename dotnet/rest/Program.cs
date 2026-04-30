@@ -1,6 +1,6 @@
 // WorkIQ REST Sample — Interactive Copilot Chat via the Work IQ Gateway
 // Supports both synchronous (/chat) and streaming (/chatOverStream) modes.
-// Usage: dotnet run -- --token <JWT|WAM> --appid <clientId> [--endpoint <url>] [--stream] [--account <email>]
+// Usage: dotnet run -- --token <JWT|WAM> --appid <clientId> [--stream] [--account <email>]
 // Docs:  https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview
 
 using System.Diagnostics;
@@ -404,8 +404,6 @@ static Config? ParseArgs(string[] args)
                                defaults to 'common' for multi-tenant apps)
 
             Options:
-              --endpoint, -e   Override the gateway host (scheme + authority only, no path).
-                               The /rest/beta path is appended automatically.
               --header, -H     Custom HTTP header in 'Key: Value' format (repeatable)
               --stream         Use streaming mode (SSE via /chatOverStream)
               --show-token     Print the raw JWT token (for reuse)

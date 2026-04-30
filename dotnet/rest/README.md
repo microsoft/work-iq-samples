@@ -12,8 +12,6 @@ Supports both **synchronous** and **streaming** (SSE) modes against the **Work I
 | Chat (sync) | `POST` | `/rest/beta/conversations/{id}/chat` | [Docs](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/copilotconversation-chat) |
 | Chat (stream) | `POST` | `/rest/beta/conversations/{id}/chatOverStream` | [Docs](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/copilotconversation-chatoverstream) |
 
-The sample appends `/rest/beta` to `--endpoint` automatically. You only need to supply the host.
-
 ## Prerequisites
 
 1. **Microsoft 365 Copilot license** on your test user.
@@ -85,7 +83,6 @@ If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and 
 | `--appid, -a` | Entra app client ID (required with `WAM`) |
 | `--tenant, -T` | Tenant ID or domain. Required with `WAM` for single-tenant apps; defaults to `common` for multi-tenant. |
 | `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
-| `--endpoint, -e` | Override the gateway host (scheme + authority only, no path) |
 | `--stream` | Use streaming mode (`/chatOverStream` via SSE) |
 | `--header, -H` | Custom request header, e.g., `-H "x-foo: bar"` (repeatable) |
 | `--show-token` | Print the raw JWT after decoding |
@@ -186,7 +183,6 @@ No A2A SDK needed — pure `HttpClient` + JSON.
 
 | Symptom | Fix |
 |---------|-----|
-| `400 Invalid request, no valid route` | Pass `--endpoint` as host-only; the sample appends `/rest/beta` |
 | `401 Unauthorized` | Token audience doesn't match the Work IQ Gateway. Verify the `aud` claim in the `── TOKEN ──` block. |
 
 See the [root README](../../README.md#troubleshooting) for the full troubleshooting matrix (WAM setup, single-tenant apps, Copilot license, etc).

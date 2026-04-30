@@ -445,8 +445,6 @@ static Config? ParseArgs(string[] args)
                                defaults to 'common' for multi-tenant apps)
 
             Options:
-              --endpoint, -e   Override the gateway host (scheme + authority only, no path).
-                               The /a2a/ path is preserved automatically.
               --agent-id, -A   Invoke a specific agent. The sample fetches the agent card
                                from {gateway}/{agent-id}/.well-known/agent-card.json and
                                uses agentCard.url as the A2A endpoint. Without --agent-id,

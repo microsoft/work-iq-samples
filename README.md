@@ -83,7 +83,6 @@ cargo run -- --appid <APP_ID>
 | `WAM_provider_error 3399614466 / IncorrectConfiguration` | App registration missing the WAM broker redirect URI `ms-appx-web://microsoft.aad.brokerplugin/{appId}` | Ask admin to re-run setup (or add that redirect URI manually). See [`ADMIN_SETUP.md`](ADMIN_SETUP.md). |
 | Same error, but redirect URI is present | Single-tenant app + `/common` authority mismatch | Pass `--tenant <TENANT_ID>` so MSAL uses the tenant-specific authority |
 | `403 Forbidden` without a scope message | User is missing the Microsoft 365 Copilot license | Assign the license; wait 15–30 min for propagation |
-| `400 BadRequest: Invalid request, no valid route` | Using `--endpoint` with an unexpected path on the Work IQ Gateway | Pass host-only to `--endpoint` (scheme + authority, no path); samples append the correct path |
 | `400 AuthenticationError: Error authenticating with resource` | Gateway rejected the downstream auth exchange (e.g., OBO against an unconfigured downstream service) | Check the request-id in the response headers against the gateway's logs |
 | WAM re-prompts for password on every `dotnet run` | MSAL in-process cache doesn't persist across processes | Expected today. A future update may add an opt-in persistent cache. |
 | `AADSTS65001: consent required` | Admin hasn't consented to the required permissions | Ask admin to run `admin-consent` (step 6 of the setup) |

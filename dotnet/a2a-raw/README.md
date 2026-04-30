@@ -4,7 +4,7 @@ A bare-minimum A2A client using only `HttpClient` and `System.Text.Json` — **n
 
 This sample **calls the agent endpoint directly** — no agent card retrieval, no discovery, no capability negotiation. It assumes you already know the agent URL and sends JSON-RPC v1.0 messages to it.
 
-Defaults target the **Work IQ Gateway** (`https://workiq.svc.cloud.microsoft/a2a/`). Use `--endpoint` + `--scope` to target a different A2A endpoint.
+Targets the **Work IQ Gateway** (`https://workiq.svc.cloud.microsoft/a2a/`).
 
 > **Protocol version**: This sample uses the **A2A v1.0 JSON-RPC wire format** (PROTOJSON conventions: SCREAMING_SNAKE_CASE enums, no `kind` discriminators, named result wrappers). Work IQ also accepts v0.3 wire format via the `A2A-Version: 0.3` request header for callers that haven't migrated yet. The v1.0 spec also defines a REST binding (`POST /v1/message:send`); Work IQ may expose this in a future preview update.
 
@@ -49,7 +49,7 @@ Add `--stream` to switch from `SendMessage` to `SendStreamingMessage`.
 
 ### Invoking a specific agent (`--agent-id`)
 
-Without `--agent-id`, the sample POSTs directly to `--endpoint` (the gateway's default agent). To target a specific agent:
+Without `--agent-id`, the sample POSTs to the Work IQ Gateway A2A endpoint (the gateway's default agent). To target a specific agent:
 
 ```bash
 dotnet run -- --agent-id <AGENT_ID> --token WAM --appid <APP_ID> --tenant <TENANT_ID>
@@ -67,7 +67,7 @@ The sample then does **two raw HTTP calls** — illustrating exactly what a non-
    - `name` — friendly name (for logging)
    - `capabilities.streaming` — whether `SendStreamingMessage` is supported
 
-2. **Message post** — same JSON-RPC shape as before, but POSTed to `agentCard.url` (read from step 1) instead of `--endpoint`.
+2. **Message post** — same JSON-RPC shape as before, but POSTed to `agentCard.url` (read from step 1) instead of the gateway A2A endpoint.
 
 If `--stream` is set but the agent's card has `capabilities.streaming = false`, the sample falls back to `SendMessage` automatically and prints a note.
 
@@ -136,7 +136,6 @@ You > quit
 | Flag | Description |
 |------|-------------|
 | `--token, -t` | `WAM` for Windows broker auth, or a pre-obtained JWT string. **Required.** |
-| `--endpoint, -e` | Full agent URL. Default: `https://workiq.svc.cloud.microsoft/a2a/` |
 | `--scope, -s` | Token scope for WAM. Default: `api://workiq.svc.cloud.microsoft/.default` |
 | `--appid, -a` | Entra app client ID (required with `WAM`) |
 | `--tenant, -T` | Tenant ID or domain. Required with `WAM` for single-tenant apps; defaults to `common` for multi-tenant. |
@@ -230,7 +229,6 @@ That's it — no A2A SDK, no JWT decoder.
 
 | Symptom | Fix |
 |---------|-----|
-| `400 Invalid request, no valid route` | Your `--endpoint` path doesn't match a gateway-registered scope. Use `/a2a/` for the Work IQ Gateway. |
 | `401 Unauthorized` | Token `aud` doesn't match the endpoint. The Work IQ Gateway needs `api://workiq.svc.cloud.microsoft/.default`. |
 | `403 Forbidden` without a scope message | User is missing the Microsoft 365 Copilot license. |
 

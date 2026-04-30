@@ -113,7 +113,6 @@ If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and 
 | `--appid, -a` | Entra app client ID (required with `WAM`) |
 | `--tenant, -T` | Tenant ID or domain. Required with `WAM` for single-tenant apps; defaults to `common` for multi-tenant. |
 | `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
-| `--endpoint, -e` | Override the gateway host (scheme + authority only, no path) |
 | `--agent-id, -A` | Invoke a specific agent (fetches `{gateway}/{agent-id}/.well-known/agent-card.json` and posts to `agentCard.url`). See [*How to find an agent ID*](#how-to-find-an-agent-id) above. |
 | `--show-wire` | Pretty-print raw JSON-RPC request/response bodies and each streaming SSE event as it arrives. Independent of `--verbosity`. Useful for protocol debugging. |
 | `--stream` | Use streaming mode (`SendStreamingMessage` via SSE) |
@@ -222,7 +221,6 @@ Use `-v 2` to see full HTTP request/response details:
 
 | Symptom | Fix |
 |---------|-----|
-| `400 Invalid request, no valid route` against Work IQ | Pass `--endpoint` as host-only; the sample appends `/a2a/` |
 | Empty response / `[Task ... — Working]` never completes | Increase the client timeout (`Timeout = TimeSpan.FromMinutes(5)` by default in `Program.cs`). Long-running grounded queries can take 30-60s on some rings. |
 | `401 Unauthorized` | Token audience doesn't match the gateway. Check the `aud` claim in the `── TOKEN ──` block. |
 

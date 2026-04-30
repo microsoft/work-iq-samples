@@ -4,12 +4,10 @@
 // WorkIQ A2A Raw Sample — Minimal A2A client using only HttpClient + JSON
 // No A2A SDK. Shows exactly what goes over the wire (JSON-RPC v0.3 format).
 //
-// Defaults target the Work IQ Gateway (`https://workiq.svc.cloud.microsoft/a2a/`).
-// Override --endpoint + --scope to target any other A2A endpoint.
+// Targets the Work IQ Gateway (`https://workiq.svc.cloud.microsoft/a2a/`).
 //
 // Usage:
 //   dotnet run -- --token <JWT|WAM> --appid <client-id> [--account user@tenant.com] [--stream]
-//   dotnet run -- --endpoint <agent-url> --token <JWT> [--stream]
 
 using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
@@ -541,14 +539,11 @@ void PrintUsage()
       --token, -t      Bearer JWT token, or 'WAM' for Windows broker auth
 
     Options:
-      --endpoint, -e   Agent URL. Defaults to the Work IQ Gateway A2A endpoint:
-                       https://workiq.svc.cloud.microsoft/a2a/
-                       Override to target a different A2A endpoint.
       --agent-id, -A   Invoke a specific agent. The sample fetches
-                       {endpoint}/{agent-id}/.well-known/agent-card.json,
+                       <gateway>/<agent-id>/.well-known/agent-card.json,
                        reads agentCard.url, and POSTs JSON-RPC there.
-                       Without --agent-id, the sample posts directly to
-                       --endpoint (default agent for that gateway).
+                       Without --agent-id, the sample posts to the
+                       Work IQ Gateway A2A endpoint (default agent).
       --scope, -s      Token scope for WAM. Defaults to the Work IQ audience:
                        api://workiq.svc.cloud.microsoft/.default
       --appid, -a      App client ID (required with WAM)
