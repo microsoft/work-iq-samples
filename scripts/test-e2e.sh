@@ -17,7 +17,7 @@ set -euo pipefail
 # Flags:
 #   --account <email>    Required. The user signing in via WAM.
 #   --samples <list>     Comma-separated: a2a,a2a-raw (default: all)
-#   --modes <list>       Comma-separated: sync,stream (default: sync)
+#   --modes <list>       Currently only `sync` is supported (default).
 #   --name <name>        App display name (default: "WIQ E2E Test <timestamp>")
 #   --tenant <id>        Tenant ID (auto-detected from az account show)
 #   --skip-build         Skip `dotnet build` (assume already built)
