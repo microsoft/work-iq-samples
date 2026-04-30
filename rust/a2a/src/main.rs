@@ -311,7 +311,11 @@ fn print_citations(metadata: &serde_json::Value, verbosity: u8) {
             println!("    {}", header.dimmed());
         }
         if !c.url.is_empty() {
-            let truncated: &str = if c.url.len() <= 120 { &c.url } else { &c.url[..120] };
+            let truncated: String = if c.url.len() <= 120 {
+                c.url.clone()
+            } else {
+                c.url.chars().take(120).collect()
+            };
             println!("       {}", truncated.dimmed());
         }
     }
