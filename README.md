@@ -99,7 +99,6 @@ dotnet run -- --token "<SOME_TOKEN>"
 ## Resources
 
 - [Work IQ overview](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/workiq-overview)
-- [Copilot Chat API](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview)
 - [A2A protocol specification](https://a2a-protocol.org/latest/specification/)
 - [MSAL.NET documentation](https://learn.microsoft.com/en-us/entra/msal/dotnet/)
 - [`ADMIN_SETUP.md`](ADMIN_SETUP.md) — detailed admin setup guide

@@ -114,7 +114,7 @@ If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and 
 | `--agent-id, -A` | Invoke a specific agent (fetches `{gateway}/{agent-id}/.well-known/agent-card.json` and posts to `agentCard.url`). See [How to find an agent ID](#how-to-find-an-agent-id) above. |
 | `--show-wire` | Pretty-print raw JSON-RPC request/response bodies. Independent of `--verbosity`. Useful for protocol debugging. |
 | `--header, -H` | Custom request header (repeatable) |
-| `--show-token` | Print the raw JWT after decoding |
+| `--show-token` | Print the raw access token (use only for diagnostics — treat tokens as sensitive) |
 | `-v, --verbosity` | `0` response only, `1` default, `2` full wire |
 
 ## How it works
@@ -142,7 +142,7 @@ If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and 
 | Multi-turn (`contextId`) | Available | Conversation state maintained across turns |
 | Text parts (`Part.FromText`) | Available | User and agent text messages |
 | Citations | Available | Via Microsoft-specific `metadata["attributions"]` (see below) |
-| Agent card (`/.well-known/agent.json`) | Coming soon | Connect to endpoint directly for now |
+| Agent card (`/.well-known/agent.json`) | Coming soon | Connects to the gateway endpoint directly for now |
 | Agent discovery / listing | Coming soon | Connects to the gateway's default agent directly for now |
 
 ## Citations

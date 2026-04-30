@@ -47,10 +47,6 @@ public static class Helpers
                     agentId = args[++i]; break;
                 case "--show-token": showToken = true; break;
                 case "--show-wire": showWire = true; break;
-                case "--stream":
-                    return Err("--stream is not supported: streaming responses are coming soon to this sample. Use the sync mode (default) for now.");
-                default:
-                    return Err($"Unknown flag: {args[i]}");
                 case "--verbosity" or "-v":
                     if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
                     if (!int.TryParse(args[++i], out verbosity))
@@ -59,6 +55,10 @@ public static class Helpers
                 case "--header" or "-H":
                     if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
                     headers.Add(args[++i]); break;
+                case "--stream":
+                    return Err("--stream is not supported: streaming responses are coming soon to this sample. Use the sync mode (default) for now.");
+                default:
+                    return Err($"Unknown flag: {args[i]}");
             }
         }
 

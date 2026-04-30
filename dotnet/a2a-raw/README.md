@@ -118,7 +118,7 @@ Type a message. 'quit' to exit.
 You > What's on my schedule today?
 Agent > Today you have:
   - 9:00 AM — team standup
-  - 11:00 AM — review with Dana
+  - 11:00 AM — review with Alice
   - 2:00 PM — customer call
   [200 OK]
   request-id: a1b2c3d4-...
