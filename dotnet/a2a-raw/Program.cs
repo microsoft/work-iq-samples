@@ -34,7 +34,7 @@ if (parsed.Error != null)
 string endpoint = parsed.Endpoint ?? "https://workiq.svc.cloud.microsoft/a2a/";
 string scope = parsed.Scope ?? "api://workiq.svc.cloud.microsoft/.default";
 string? token = parsed.Token, appId = parsed.AppId, account = parsed.Account, tenant = parsed.Tenant, agentId = parsed.AgentId;
-bool stream = parsed.Stream, allHeaders = parsed.AllHeaders, listAgents = parsed.ListAgents, showWire = parsed.ShowWire;
+bool stream = parsed.Stream, allHeaders = parsed.AllHeaders, showWire = parsed.ShowWire;
 
 if (string.IsNullOrEmpty(token))
 {
@@ -70,64 +70,6 @@ http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("appli
 // to the v0.3 dispatcher and v1.0 method names ("SendMessage" /
 // "SendStreamingMessage") return JSON-RPC -32601 "Method not found".
 http.DefaultRequestHeaders.TryAddWithoutValidation("A2A-Version", "1.0");
-
-// ── --list-agents: GET {endpoint}/.agents and exit ───────────────────────
-//
-// {endpoint}/.agents is a Work IQ / Sydney extension (not part of the A2A
-// spec) returning an array of {agentId, name, provider} entries. Useful for
-// discovering IDs to pass to --agent-id.
-if (listAgents)
-{
-    var listUri = $"{endpoint.TrimEnd('/')}/.agents";
-    HttpResponseMessage listRes;
-    try { listRes = await http.GetAsync(listUri); }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"ERROR: failed to GET {listUri}: {ex.Message}");
-        return;
-    }
-
-    if (!listRes.IsSuccessStatusCode)
-    {
-        var body = await listRes.Content.ReadAsStringAsync();
-        Console.Error.WriteLine($"ERROR: {(int)listRes.StatusCode} {listRes.ReasonPhrase} from {listUri}");
-        if (!string.IsNullOrWhiteSpace(body)) Console.Error.WriteLine($"  {body.Trim()}");
-        return;
-    }
-
-    var listJson = await listRes.Content.ReadAsStringAsync();
-    using var listDoc = JsonDocument.Parse(listJson);
-    if (listDoc.RootElement.ValueKind != JsonValueKind.Array)
-    {
-        Console.Error.WriteLine($"ERROR: expected JSON array from {listUri}, got {listDoc.RootElement.ValueKind}");
-        return;
-    }
-
-    var rows = listDoc.RootElement.EnumerateArray()
-        .Select(e => (
-            Id: e.TryGetProperty("agentId", out var id) ? id.GetString() ?? "" : "",
-            Name: e.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "",
-            Provider: e.TryGetProperty("provider", out var p) ? p.GetString() ?? "" : ""))
-        .ToList();
-
-    Console.WriteLine();
-    Console.WriteLine($"Agents at {endpoint}:");
-    Console.WriteLine();
-    if (rows.Count == 0)
-    {
-        Console.WriteLine("  (none)");
-        return;
-    }
-
-    int wId = Math.Max(8, rows.Max(r => r.Id.Length));
-    int wName = Math.Max(4, rows.Max(r => r.Name.Length));
-    Console.WriteLine($"  {"AGENT ID".PadRight(wId)}  {"NAME".PadRight(wName)}  PROVIDER");
-    foreach (var r in rows)
-        Console.WriteLine($"  {r.Id.PadRight(wId)}  {r.Name.PadRight(wName)}  {r.Provider}");
-    Console.WriteLine();
-    Console.WriteLine($"{rows.Count} agent{(rows.Count == 1 ? "" : "s")}.");
-    return;
-}
 
 // ── Agent card resolution (when --agent-id is set) ───────────────────────
 //
@@ -622,7 +564,6 @@ void PrintUsage()
                        defaults to 'common' for multi-tenant apps)
       --stream         Use streaming mode (SSE via message/stream)
       --all-headers    Print all response headers (default: key diagnostics only)
-      --list-agents    GET {endpoint}/.agents and print, then exit (no chat loop)
       --show-wire      Pretty-print raw JSON-RPC request/response bodies (and each
                        streaming SSE `data:` event as it arrives).
 
@@ -631,7 +572,6 @@ void PrintUsage()
       dotnet run -- -t WAM -a <appid>
 
       # List agents (discover IDs to use with --agent-id)
-      dotnet run -- -t WAM -a <appid> --list-agents
 
       # Invoke a specific agent
       dotnet run -- -t WAM -a <appid> --agent-id <AGENT_ID>

@@ -41,15 +41,6 @@ WireLog.Verbosity = config.Verbosity;
 WireLog.ShowWire = config.ShowWire;
 var httpClient = CreateHttpClient(token, config.Gateway);
 
-// --list-agents: GET {endpoint}/.agents and print, then exit. The endpoint
-// is a Work IQ / Sydney extension (not part of the A2A spec) returning an
-// array of {agentId, name, provider} entries.
-if (config.ListAgents)
-{
-    await ListAgentsAsync(config.Gateway.Endpoint, httpClient);
-    return;
-}
-
 // Resolve the A2A target URL.
 //   --agent-id not set: post directly to the gateway endpoint (default agent for that gateway).
 //   --agent-id set:     fetch the agent card from {gateway}/{agentId}/.well-known/agent-card.json
@@ -348,58 +339,6 @@ static void PrintStreamEvent(StreamResponse evt)
     Console.ResetColor();
 }
 
-static async Task ListAgentsAsync(string endpoint, HttpClient httpClient)
-{
-    var url = new Uri($"{endpoint.TrimEnd('/')}/.agents");
-    HttpResponseMessage response;
-    try { response = await httpClient.GetAsync(url); }
-    catch (Exception ex)
-    {
-        Ink($"ERROR: failed to GET {url}: {ex.Message}\n", ConsoleColor.Red);
-        return;
-    }
-
-    if (!response.IsSuccessStatusCode)
-    {
-        var body = await response.Content.ReadAsStringAsync();
-        Ink($"ERROR: {(int)response.StatusCode} {response.ReasonPhrase} from {url}\n", ConsoleColor.Red);
-        if (!string.IsNullOrWhiteSpace(body)) Console.Error.WriteLine($"  {body.Trim()}");
-        return;
-    }
-
-    var json = await response.Content.ReadAsStringAsync();
-    using var doc = JsonDocument.Parse(json);
-    if (doc.RootElement.ValueKind != JsonValueKind.Array)
-    {
-        Ink($"ERROR: expected JSON array from {url}, got {doc.RootElement.ValueKind}\n", ConsoleColor.Red);
-        return;
-    }
-
-    var agents = doc.RootElement.EnumerateArray()
-        .Select(e => (
-            Id: e.TryGetProperty("agentId", out var id) ? id.GetString() ?? "" : "",
-            Name: e.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "",
-            Provider: e.TryGetProperty("provider", out var p) ? p.GetString() ?? "" : ""))
-        .ToList();
-
-    Console.WriteLine();
-    Console.WriteLine($"Agents at {endpoint}:");
-    Console.WriteLine();
-    if (agents.Count == 0)
-    {
-        Console.WriteLine("  (none)");
-        return;
-    }
-
-    int wId = Math.Max(8, agents.Max(a => a.Id.Length));
-    int wName = Math.Max(4, agents.Max(a => a.Name.Length));
-    Ink($"  {"AGENT ID".PadRight(wId)}  {"NAME".PadRight(wName)}  PROVIDER\n", ConsoleColor.DarkGray);
-    foreach (var a in agents)
-        Console.WriteLine($"  {a.Id.PadRight(wId)}  {a.Name.PadRight(wName)}  {a.Provider}");
-    Console.WriteLine();
-    Console.WriteLine($"{agents.Count} agent{(agents.Count == 1 ? "" : "s")}.");
-}
-
 // ── WAM auth ─────────────────────────────────────────────────────────────
 
 static async Task<(string token, IPublicClientApplication app, IAccount? account)> AcquireWamToken(
@@ -488,7 +427,7 @@ static Config? ParseArgs(string[] args)
     }
 
     string? token = a.Token, appId = a.AppId, endpoint = a.Endpoint, account = a.Account, tenant = a.Tenant, agentId = a.AgentId;
-    bool showToken = a.ShowToken, stream = a.Stream, listAgents = a.ListAgents, showWire = a.ShowWire;
+    bool showToken = a.ShowToken, stream = a.Stream, showWire = a.ShowWire;
     int verbosity = a.Verbosity;
     var headers = a.Headers;
 
@@ -517,7 +456,6 @@ static Config? ParseArgs(string[] args)
               --header, -H     Custom HTTP header in 'Key: Value' format (repeatable)
               --show-token     Print the raw JWT token (for reuse with --token)
               --stream         Use streaming mode (SSE via message/stream)
-              --list-agents    GET {endpoint}/.agents and print, then exit (no chat loop)
               --show-wire      Pretty-print raw JSON-RPC request/response bodies (and streaming
                                SSE events). Independent of --verbosity.
               -v, --verbosity  0 = response only, 1 = default, 2 = wire diagnostics
@@ -526,7 +464,6 @@ static Config? ParseArgs(string[] args)
               dotnet run -- --token WAM --appid <your-app-id> --tenant <your-tenant>
               dotnet run -- --token WAM --appid <your-app-id> --account user@contoso.com
               dotnet run -- --token WAM --appid <your-app-id> --agent-id <AGENT_ID>
-              dotnet run -- --token WAM --appid <your-app-id> --list-agents
               dotnet run -- --token eyJ0eXAi...
             """);
         return null;
@@ -552,7 +489,7 @@ static Config? ParseArgs(string[] args)
         gw = gw with { ExtraHeaders = [.. gw.ExtraHeaders, .. headers] };
     }
 
-    return new Config(token, appId ?? "", gw, account, tenant, agentId, showToken, verbosity, stream, listAgents, showWire);
+    return new Config(token, appId ?? "", gw, account, tenant, agentId, showToken, verbosity, stream, showWire);
 }
 
 // ── Citations ─────────────────────────────────────────────────────────────
@@ -611,7 +548,7 @@ static void Ink(string s, ConsoleColor c) { Console.ForegroundColor = c; Console
 [DllImport("user32.dll", ExactSpelling = true)] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
 static IntPtr ConsoleWindowHandle() { var c = Win32GetConsoleWindow(); var r = GetAncestor(c, 3); return r != IntPtr.Zero ? r : c; }
 
-record Config(string Token, string AppId, GatewayConfig Gateway, string? Account, string? Tenant, string? AgentId, bool ShowToken, int Verbosity, bool Stream, bool ListAgents, bool ShowWire);
+record Config(string Token, string AppId, GatewayConfig Gateway, string? Account, string? Tenant, string? AgentId, bool ShowToken, int Verbosity, bool Stream, bool ShowWire);
 
 // ── Gateway definitions ──────────────────────────────────────────────────
 

@@ -57,29 +57,20 @@ The sample then:
 3. Uses `agentCard.url` (not the gateway endpoint) as the target for `A2AClient`.
 4. Falls back to sync mode if `--stream` is set but the agent doesn't advertise streaming (a note prints at `-v >= 1`).
 
-#### How to find an agent ID — `--list-agents`
+#### How to find an agent ID
 
-Pass `--list-agents` to fetch and print the gateway's agent registry. The sample GETs `{endpoint}/.agents` (a Work IQ / Sydney extension, not part of the A2A spec) and prints `{agentId, name, provider}` for each entry, then exits — no chat loop:
+Use the [WorkIQ CLI](https://www.npmjs.com/package/@microsoft/workiq) to list the agents available to your signed-in user. The list command is currently behind an `experimental` flag:
 
 ```bash
-dotnet run -- --token WAM --list-agents \
-  --appid <APP_ID> --tenant <TENANT_ID>
+npm install -g @microsoft/workiq        # or: dotnet tool install --global WorkIQ
+workiq accept-eula
+workiq config set experimental=true
+workiq list-agents
 ```
 
-Sample output:
+You can also copy the agent ID from the address bar in the [Microsoft 365 Copilot Chat website](https://m365.cloud.microsoft/chat/) — the segment after `/chat/agent/`. Treat the ID as an opaque string.
 
-```
-Agents at https://workiq.svc.cloud.microsoft/a2a/:
-
-  AGENT ID                  NAME              PROVIDER
-  bizchat-as-gpt-scenario   BizChat           Microsoft
-  researcher-v1             Researcher        Microsoft
-  ...
-
-5 agents.
-```
-
-The Work IQ default agent (BizChat-as-GPT scenario) has id `bizchat-as-gpt-scenario` — but you don't need `--agent-id` to invoke it; not specifying any agent already routes there.
+Without `--agent-id`, the sample posts to the gateway's default agent.
 
 ### With a pre-obtained JWT (any platform)
 
@@ -124,7 +115,6 @@ If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and 
 | `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
 | `--endpoint, -e` | Override the gateway host (scheme + authority only, no path) |
 | `--agent-id, -A` | Invoke a specific agent (fetches `{gateway}/{agent-id}/.well-known/agent-card.json` and posts to `agentCard.url`) |
-| `--list-agents` | GET `{endpoint}/.agents` and print, then exit (no chat loop). Use to discover agent IDs. |
 | `--show-wire` | Pretty-print raw JSON-RPC request/response bodies and each streaming SSE event as it arrives. Independent of `--verbosity`. Useful for protocol debugging. |
 | `--stream` | Use streaming mode (`SendStreamingMessage` via SSE) |
 | `--header, -H` | Custom request header (repeatable) |
