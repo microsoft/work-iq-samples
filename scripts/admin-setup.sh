@@ -15,9 +15,6 @@ set -euo pipefail
 #                    [--multi-tenant] [--dry-run] [--verbose] [-h|--help]
 #
 # Defaults: name "Work IQ Samples Client", single-tenant.
-#
-# For the Swift iOS sample, use swift/a2a/setup-app-registration.sh
-# (needs an iOS-specific redirect URI).
 
 # ── Defaults ────────────────────────────────────────────────────────────
 DISPLAY_NAME="Work IQ Samples Client"
@@ -197,10 +194,10 @@ echo "  APP_ID:    $APP_ID"
 echo "  TENANT_ID: $TENANT_ID"
 echo ""
 echo "Test commands:"
-echo "  # Work IQ REST (Copilot Chat via Work IQ Gateway):"
-echo "  cd dotnet/rest && dotnet run -- --token WAM \\"
-echo "      --appid $APP_ID --tenant $TENANT_ID"
-echo ""
 echo "  # Work IQ A2A:"
 echo "  cd dotnet/a2a && dotnet run -- --token WAM \\"
+echo "      --appid $APP_ID --tenant $TENANT_ID"
+echo ""
+echo "  # Work IQ A2A (raw):"
+echo "  cd dotnet/a2a-raw && dotnet run -- --token WAM \\"
 echo "      --appid $APP_ID --tenant $TENANT_ID"

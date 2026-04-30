@@ -33,8 +33,7 @@
   .\admin-setup.ps1 -Name "My Samples App" -MultiTenant
 
 .NOTES
-  For the Swift iOS sample, use swift/a2a/setup-app-registration.ps1
-  (needs an iOS-specific redirect URI).
+  See repository documentation for setup details.
 #>
 
 [CmdletBinding()]
@@ -228,10 +227,10 @@ Write-Host "  APP_ID:    $appId"
 Write-Host "  TENANT_ID: $Tenant"
 Write-Host ''
 Write-Host 'Test commands:'
-Write-Host '  # Work IQ REST (Copilot Chat via Work IQ Gateway):'
-Write-Host "  cd dotnet/rest; dotnet run -- --token WAM ``"
-Write-Host "      --appid $appId --tenant $Tenant"
-Write-Host ''
 Write-Host '  # Work IQ A2A:'
 Write-Host "  cd dotnet/a2a; dotnet run -- --token WAM ``"
+Write-Host "      --appid $appId --tenant $Tenant"
+Write-Host ''
+Write-Host '  # Work IQ A2A (raw):'
+Write-Host "  cd dotnet/a2a-raw; dotnet run -- --token WAM ``"
 Write-Host "      --appid $appId --tenant $Tenant"
