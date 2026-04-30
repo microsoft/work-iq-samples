@@ -229,7 +229,10 @@ while (true)
                             }
                         }
 
-                        if (config.Verbosity >= 2)
+                        // Per-chunk markers are too noisy at -v 2 (Sydney emits very
+                        // small chunks, fragmenting the streamed answer). Show them
+                        // only with --show-wire alongside the raw event JSON.
+                        if (config.ShowWire)
                             Ink($"  [artifact {ShortId(aId)} +{chunk.Length}c{(au.LastChunk ? " LAST" : "")}]\n", ConsoleColor.DarkGray);
                         break;
                     }
