@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="A2A" Version="0.3.3-preview" />
+    <PackageReference Include="A2A" Version="1.0.0-preview2" />
     <PackageReference Include="Microsoft.Identity.Client" Version="4.83.1" />
     <PackageReference Include="Microsoft.Identity.Client.Broker" Version="4.83.1" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.16.0" />

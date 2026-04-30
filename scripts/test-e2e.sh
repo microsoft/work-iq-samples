@@ -8,17 +8,16 @@ set -euo pipefail
 # deletes the app on exit. Each invocation is interactive: send a
 # message when prompted, type 'quit' to move on to the next.
 #
-# Requires: Azure CLI (logged in), .NET 10 SDK.
+# Requires: Azure CLI (logged in), .NET 8 SDK or later.
 #
 # Usage:
 #   scripts/test-e2e.sh --account user@tenant.com
-#   scripts/test-e2e.sh --account user@tenant.com --modes sync
-#   scripts/test-e2e.sh --account user@tenant.com --samples rest,a2a --keep-app
+#   scripts/test-e2e.sh --account user@tenant.com --samples a2a --keep-app
 #
 # Flags:
 #   --account <email>    Required. The user signing in via WAM.
-#   --samples <list>     Comma-separated: rest,a2a,a2a-raw (default: all)
-#   --modes <list>       Comma-separated: sync,stream (default: both)
+#   --samples <list>     Comma-separated: a2a,a2a-raw (default: all)
+#   --modes <list>       Currently only `sync` is supported (default).
 #   --name <name>        App display name (default: "WIQ E2E Test <timestamp>")
 #   --tenant <id>        Tenant ID (auto-detected from az account show)
 #   --skip-build         Skip `dotnet build` (assume already built)
@@ -26,12 +25,12 @@ set -euo pipefail
 #   --appid <guid>       Existing App ID (requires --skip-setup)
 #   --keep-app           Don't delete the app on exit
 #   --log-dir <path>     Where to write per-run logs (default: ./test-logs)
-#   --agent-id <id>      Pass --agent-id to a2a + a2a-raw runs (REST ignores it)
+#   --agent-id <id>      Pass --agent-id to a2a + a2a-raw runs
 
 # ── Defaults ────────────────────────────────────────────────────────────
 ACCOUNT=""
-SAMPLES="rest,a2a,a2a-raw"
-MODES="sync,stream"
+SAMPLES="a2a,a2a-raw"
+MODES="sync"
 APP_NAME="WIQ E2E Test $(date +%Y%m%d-%H%M%S)"
 TENANT_ID=""
 SKIP_BUILD="false"
@@ -79,7 +78,7 @@ if ! az account show >/dev/null 2>&1; then
 fi
 
 if ! command -v dotnet >/dev/null 2>&1; then
-  echo "ERROR: dotnet CLI not found. Install .NET 10 SDK." >&2
+  echo "ERROR: dotnet CLI not found. Install .NET 8 SDK or later." >&2
   exit 1
 fi
 
@@ -192,18 +191,26 @@ run_sample() {
   local label="$RUN_IDX/$TOTAL  $sample / $mode"
   local log_file="$LOG_DIR/$(printf '%02d' $RUN_IDX)-${sample}-${mode}.log"
 
+  # Streaming is not yet supported by the a2a / a2a-raw samples (coming soon).
+  # Skip those combinations rather than failing the run.
+  if [[ "$mode" == "stream" && ( "$sample" == "a2a" || "$sample" == "a2a-raw" ) ]]; then
+    echo ""
+    echo "  [$label]  SKIP — streaming responses are coming soon to this sample"
+    return 0
+  fi
+
   # Build the command per sample
   local project="$REPO_ROOT/dotnet/$sample"
   local stream_flag=""
   [[ "$mode" == "stream" ]] && stream_flag="--stream"
 
-  # When --agent-id is provided, append it to a2a / a2a-raw commands (REST doesn't support it)
+  # When --agent-id is provided, append it to the run.
   local agent_flag=""
-  [[ -n "$AGENT_ID" && "$sample" != "rest" ]] && agent_flag="--agent-id $AGENT_ID"
+  [[ -n "$AGENT_ID" ]] && agent_flag="--agent-id $AGENT_ID"
 
   local cmd
   case "$sample" in
-    rest|a2a|a2a-raw)
+    a2a|a2a-raw)
       cmd=(dotnet run --project "$project" --
            --token WAM
            --appid "$APP_ID"

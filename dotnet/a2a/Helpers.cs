@@ -9,7 +9,7 @@ namespace WorkIQ.A2A;
 public record A2AArgs(
     string? Token, string? AppId, string? Endpoint, string? Account, string? Tenant,
     string? AgentId,
-    bool ShowToken, bool Stream, bool ListAgents,
+    bool ShowToken, bool ShowWire,
     int Verbosity, List<string> Headers, string? Error);
 
 public static class Helpers
@@ -19,7 +19,7 @@ public static class Helpers
     public static A2AArgs ParseArgs(string[] args)
     {
         string? token = null, appId = null, endpoint = null, account = null, tenant = null, agentId = null;
-        bool showToken = false, stream = false, listAgents = false;
+        bool showToken = false, showWire = false;
         int verbosity = 1;
         var headers = new List<string>();
 
@@ -46,8 +46,7 @@ public static class Helpers
                     if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
                     agentId = args[++i]; break;
                 case "--show-token": showToken = true; break;
-                case "--stream": stream = true; break;
-                case "--list-agents": listAgents = true; break;
+                case "--show-wire": showWire = true; break;
                 case "--verbosity" or "-v":
                     if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
                     if (!int.TryParse(args[++i], out verbosity))
@@ -56,23 +55,52 @@ public static class Helpers
                 case "--header" or "-H":
                     if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
                     headers.Add(args[++i]); break;
+                case "--stream":
+                    return Err("--stream is not supported: streaming responses are coming soon to this sample. Use the sync mode (default) for now.");
+                default:
+                    return Err($"Unknown flag: {args[i]}");
             }
         }
 
-        return new A2AArgs(token, appId, endpoint, account, tenant, agentId, showToken, stream, listAgents, verbosity, headers, null);
+        return new A2AArgs(token, appId, endpoint, account, tenant, agentId, showToken, showWire, verbosity, headers, null);
 
-        static A2AArgs Err(string msg) => new(null, null, null, null, null, null, false, false, false, 1, new List<string>(), msg);
+        static A2AArgs Err(string msg) => new(null, null, null, null, null, null, false, false, 1, new List<string>(), msg);
     }
 
-    // ── Response extraction (uses A2A SDK types) ────────────────────────
+    // ── Sync response extraction (A2A SDK v1.0 SendMessageResponse) ─────
 
-    public static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(object response) => response switch
+    public static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(SendMessageResponse response)
     {
-        AgentMessage am => (Join(am), am.ContextId, am.Metadata),
-        AgentTask { Status: { State: TaskState.Completed, Message: AgentMessage cm } } t => (Join(cm), t.ContextId, cm.Metadata),
-        AgentTask t => ($"[Task {t.Id} — {t.Status.State}]", t.ContextId, null),
-        _ => ("(no response)", null, null),
-    };
+        switch (response.PayloadCase)
+        {
+            case SendMessageResponseCase.Message:
+            {
+                var m = response.Message!;
+                return (JoinText(m.Parts), m.ContextId, m.Metadata);
+            }
+            case SendMessageResponseCase.Task:
+            {
+                var t = response.Task!;
+                // Citations: still in Status.Message.Metadata until DataPart migration ships.
+                return (ExtractTextFromTask(t), t.ContextId, t.Status.Message?.Metadata);
+            }
+            default:
+                return ("(no response)", null, null);
+        }
+    }
 
-    public static string Join(AgentMessage m) => string.Join("\n", m.Parts.OfType<TextPart>().Select(p => p.Text));
+    // The agent's answer text is delivered in Artifacts[].Parts (text parts).
+    // Status.Message carries chain-of-thought / progress and metadata, not the
+    // final answer.
+    public static string ExtractTextFromTask(AgentTask task)
+    {
+        var fromArtifacts = JoinText(
+            (task.Artifacts ?? new List<Artifact>()).SelectMany(a => a.Parts));
+        if (!string.IsNullOrEmpty(fromArtifacts)) return fromArtifacts;
+
+        return $"[Task {task.Id} — {task.Status.State}]";
+    }
+
+    public static string JoinText(IEnumerable<Part> parts) =>
+        string.Join("\n", parts.Where(p => p.ContentCase == PartContentCase.Text).Select(p => p.Text!));
 }
