@@ -25,7 +25,7 @@ All .NET samples target the **Work IQ Gateway** (`workiq.svc.cloud.microsoft`) �
 1. **Microsoft 365 Copilot license** on the test user (license propagation can take 15–30 minutes after assignment).
 2. **Entra app registration** configured in your tenant — this is a one-time setup per tenant. Details below.
 3. **Your language toolchain**:
-   - **dotnet/** samples: [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or later
+   - **dotnet/** samples: [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later
    - **rust/** samples: [Rust toolchain](https://rustup.rs/) (stable)
    - **swift/** samples: [Xcode 26+](https://developer.apple.com/xcode/) (macOS only)
 

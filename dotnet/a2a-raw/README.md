@@ -31,7 +31,7 @@ Use this sample when you want to understand the A2A protocol at the HTTP level, 
      ..\..\scripts\admin-setup.ps1
      ```
    - Otherwise, hand [`../../ADMIN_SETUP.md`](../../ADMIN_SETUP.md) to your admin. They'll give you an **App ID** and **Tenant ID**.
-3. **.NET 10 SDK** or later — [download](https://dotnet.microsoft.com/download/dotnet/10.0).
+3. **.NET 8 SDK** or later — [download](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ## Quick start
 
