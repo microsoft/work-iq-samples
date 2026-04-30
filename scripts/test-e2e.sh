@@ -192,6 +192,14 @@ run_sample() {
   local label="$RUN_IDX/$TOTAL  $sample / $mode"
   local log_file="$LOG_DIR/$(printf '%02d' $RUN_IDX)-${sample}-${mode}.log"
 
+  # Streaming is not yet supported by the a2a / a2a-raw samples (coming soon).
+  # Skip those combinations rather than failing the run.
+  if [[ "$mode" == "stream" && ( "$sample" == "a2a" || "$sample" == "a2a-raw" ) ]]; then
+    echo ""
+    echo "  [$label]  SKIP — streaming responses are coming soon to this sample"
+    return 0
+  fi
+
   # Build the command per sample
   local project="$REPO_ROOT/dotnet/$sample"
   local stream_flag=""

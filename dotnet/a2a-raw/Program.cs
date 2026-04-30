@@ -22,8 +22,7 @@ using WorkIQ.A2ARaw;
 var parsed = Helpers.ParseArgs(args);
 if (parsed.Error != null)
 {
-    Console.Error.WriteLine(parsed.Error);
-    PrintUsage();
+    Console.Error.WriteLine($"ERROR: {parsed.Error}");
     return;
 }
 
