@@ -80,24 +80,27 @@ public static class Helpers
         _ => ("(no response)", null, null),
     };
 
-    // TODO(post-fedb1c9 WW rollout, ~early May 2026): drop the Status.Message.Parts
-    // text fallback once Sydney's "answer-as-artifact" change has fully rolled out.
-    // Tracking: Sydney master commit fedb1c9 (PR 5114178). The fallback exists so
-    // the sample produces a non-empty response during the brief window where Sydney
-    // rings still emit text in Status.Message.Parts (legacy shape).
+    // Sydney's "answer-as-artifact" change (master commit fedb1c9 / PR 5114178)
+    // is mid-rollout. The shape-based discriminator: if Status.Message.Parts has
+    // text, this is a pre-fedb1c9 ring still emitting the answer in the legacy
+    // location — use it. If Status.Message has no text, this is a post-fedb1c9
+    // ring and the answer lives in Artifacts. Some transitional rings populate
+    // both (artifact carries a fragment of citation-marker tail; full answer is
+    // in Status.Message); the rule still picks the right one because we check
+    // Status.Message first.
+    // TODO(post-fedb1c9 WW rollout, ~early May 2026): drop the Status.Message
+    // arm and use Artifacts[].Parts directly.
     public static string ExtractTextFromTask(AgentTask task)
     {
-        // Preferred (post-fedb1c9): text in Artifacts[].Parts[Text].
+        if (task.Status.Message?.Parts is { } msgParts)
+        {
+            var fromStatusMessage = JoinText(msgParts);
+            if (!string.IsNullOrEmpty(fromStatusMessage)) return fromStatusMessage;
+        }
+
         var fromArtifacts = JoinText(
             (task.Artifacts ?? new List<Artifact>()).SelectMany(a => a.Parts));
         if (!string.IsNullOrEmpty(fromArtifacts)) return fromArtifacts;
-
-        // Fallback (pre-fedb1c9): text in Status.Message.Parts[Text].
-        if (task.Status.Message?.Parts is { } msgParts)
-        {
-            var fromMsg = JoinText(msgParts);
-            if (!string.IsNullOrEmpty(fromMsg)) return fromMsg;
-        }
 
         return $"[Task {task.Id} — {task.Status.State}]";
     }

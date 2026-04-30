@@ -137,24 +137,29 @@ while (true)
 
         if (effectiveStream)
         {
-            // Track the latest cumulative text we've seen so we can print only new content.
-            // Both sources are read because Sydney's "answer-as-artifact" rollout is in flight:
-            //   - New shape (post-fedb1c9): text accumulates in ArtifactUpdate.Artifact.Parts[Text]
-            //   - Legacy shape (pre-fedb1c9): text appears in StatusUpdate.Status.Message.Parts[Text]
-            // TODO(post-rollout): remove the Status.Message text path; keep only ArtifactUpdate.
-            var previousText = string.Empty;
+            // Track candidate cumulative text from each shape — print whichever is
+            // currently longer. During Sydney's "answer-as-artifact" rollout, some
+            // rings populate both ArtifactUpdate.Artifact.Parts (new shape) AND
+            // StatusUpdate.Status.Message.Parts (legacy shape) with one being a
+            // fragment. Length-pick keeps output correct on either path without
+            // having to detect which shape is "valid".
+            // TODO(post-rollout): drop statusMessageText tracking; keep only artifactText.
+            var artifactText = string.Empty;
+            var statusMessageText = string.Empty;
+            var previousPrinted = string.Empty;
+
             await foreach (var evt in a2a.SendStreamingMessageAsync(new SendMessageRequest { Message = msg }))
             {
                 if (config.ShowWire) PrintStreamEvent(evt);
 
-                string? combined = null;
+                bool reachedTerminal = false;
 
                 switch (evt.PayloadCase)
                 {
                     case StreamResponseCase.ArtifactUpdate:
                     {
                         var artifact = evt.ArtifactUpdate!.Artifact;
-                        combined = Helpers.JoinText(artifact.Parts);
+                        artifactText = Helpers.JoinText(artifact.Parts);
 
                         if (config.Verbosity >= 1)
                             Ink($"  [artifact {artifact.ArtifactId[..Math.Min(8, artifact.ArtifactId.Length)]} {artifact.Parts.Count} part(s)]\n", ConsoleColor.DarkGray);
@@ -167,28 +172,12 @@ while (true)
                         {
                             contextId = statusMsg.ContextId;
                             responseMetadata = statusMsg.Metadata;
-                            // Only treat status-message text as the response if no artifact text has
-                            // arrived yet (legacy pre-fedb1c9 shape).
-                            if (string.IsNullOrEmpty(previousText))
-                                combined = Helpers.JoinText(statusMsg.Parts);
+                            statusMessageText = Helpers.JoinText(statusMsg.Parts);
                         }
                         if (config.Verbosity >= 1)
                             Ink($"  [{statusUpdate.Status.State}]\n", ConsoleColor.DarkGray);
 
-                        if (IsTerminal(statusUpdate.Status.State))
-                        {
-                            spinner.Stop();
-                            // Print any tail text from this final event before exiting.
-                            if (combined != null && combined.Length > previousText.Length)
-                            {
-                                Console.Write(combined.StartsWith(previousText, StringComparison.Ordinal)
-                                    ? combined[previousText.Length..]
-                                    : combined);
-                            }
-                            sw.Stop();
-                            Console.WriteLine();
-                            goto streaming_done;
-                        }
+                        if (IsTerminal(statusUpdate.Status.State)) reachedTerminal = true;
                         break;
                     }
                     case StreamResponseCase.Task:
@@ -202,25 +191,34 @@ while (true)
                     {
                         contextId = evt.Message!.ContextId;
                         responseMetadata = evt.Message.Metadata;
-                        combined = Helpers.JoinText(evt.Message.Parts);
+                        // Direct Message reply — treat as artifact-equivalent text.
+                        artifactText = Helpers.JoinText(evt.Message.Parts);
                         break;
                     }
                 }
 
-                if (combined != null)
+                // Shape-based pick: if Status.Message has text, this is a
+                // pre-fedb1c9 ring still emitting in the legacy location — use
+                // it. Otherwise use the artifact path. Same rule as sync mode.
+                var combined = !string.IsNullOrEmpty(statusMessageText)
+                    ? statusMessageText
+                    : artifactText;
+
+                if (combined.Length > previousPrinted.Length)
                 {
                     spinner.Stop();
-                    // Print delta from previous (cumulative-text streaming convention).
-                    if (combined.StartsWith(previousText, StringComparison.Ordinal))
-                    {
-                        Console.Write(combined[previousText.Length..]);
-                        previousText = combined;
-                    }
-                    else if (combined != previousText)
-                    {
-                        Console.Write(combined);
-                        previousText = combined;
-                    }
+                    Console.Write(combined.StartsWith(previousPrinted, StringComparison.Ordinal)
+                        ? combined[previousPrinted.Length..]
+                        : combined);
+                    previousPrinted = combined;
+                }
+
+                if (reachedTerminal)
+                {
+                    spinner.Stop();
+                    sw.Stop();
+                    Console.WriteLine();
+                    goto streaming_done;
                 }
             }
 

@@ -77,13 +77,21 @@ public static class Helpers
 
     public static string ExtractText(JsonElement el)
     {
-        // 1, 2: sync `task` payload — try artifacts first, then legacy status.message.
+        // 1, 2: sync `task` payload. Use the shape-based discriminator: if
+        // status.message.parts has text, the server is still on the legacy
+        // emission path (pre-fedb1c9) — use it. If status.message is empty,
+        // the answer lives in artifacts (post-fedb1c9). Some transitional
+        // rings populate both (artifact carries a fragment while status.
+        // message has the full answer); the legacy-first check correctly
+        // picks the full answer.
         if (el.TryGetProperty("task", out var task))
         {
-            if (TryGetArtifactsText(task, out var artText)) return artText;
             if (task.TryGetProperty("status", out var status) &&
                 status.TryGetProperty("message", out var msg) &&
-                TryGetParts(msg, out var legacyText)) return legacyText;
+                TryGetParts(msg, out var fromStatusMessage))
+                return fromStatusMessage;
+
+            if (TryGetArtifactsText(task, out var fromArtifacts)) return fromArtifacts;
         }
 
         // 3: sync `message` payload (direct reply, no task).

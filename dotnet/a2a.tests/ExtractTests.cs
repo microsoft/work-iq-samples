@@ -86,9 +86,11 @@ public class ExtractTests
     }
 
     [Fact]
-    public void Extract_TaskWithArtifactAndLegacyMessage_PrefersArtifact()
+    public void Extract_TaskWithBothShapes_PrefersStatusMessage()
     {
-        // When both new and legacy shapes are present, the artifact wins.
+        // Shape-based rule: when Status.Message has text we're talking to a
+        // pre-fedb1c9 ring (still emitting the answer in the legacy location).
+        // Use Status.Message regardless of what's in Artifacts.
         var task = new AgentTask
         {
             Id = "t-both",
@@ -100,7 +102,7 @@ public class ExtractTests
                 {
                     Role = Role.Agent,
                     MessageId = "m-status",
-                    Parts = [Part.FromText("LEGACY text")],
+                    Parts = [Part.FromText("LEGACY answer")],
                 },
             },
             Artifacts =
@@ -108,14 +110,49 @@ public class ExtractTests
                 new Artifact
                 {
                     ArtifactId = "a-new",
-                    Parts = [Part.FromText("NEW text")],
+                    Parts = [Part.FromText("artifact text")],
                 },
             ],
         };
         var response = new SendMessageResponse { Task = task };
 
         var (text, _, _) = Helpers.Extract(response);
-        Assert.Equal("NEW text", text);
+        Assert.Equal("LEGACY answer", text);
+    }
+
+    [Fact]
+    public void Extract_TaskWithArtifactFragment_PicksStatusMessage()
+    {
+        // Real-world rollout case: artifact has only a tail fragment of markup
+        // ("\")" leftover from a citation marker) while the full answer is in
+        // Status.Message. Length-pick correctly chooses Status.Message.
+        var task = new AgentTask
+        {
+            Id = "t-frag",
+            ContextId = "ctx-frag",
+            Status = new global::A2A.TaskStatus
+            {
+                State = TaskState.Completed,
+                Message = new Message
+                {
+                    Role = Role.Agent,
+                    MessageId = "m-real",
+                    Parts = [Part.FromText("This is the full, real, lengthy answer the agent produced for the user.")],
+                },
+            },
+            Artifacts =
+            [
+                new Artifact
+                {
+                    ArtifactId = "a-frag",
+                    Parts = [Part.FromText("\")")],
+                },
+            ],
+        };
+        var response = new SendMessageResponse { Task = task };
+
+        var (text, _, _) = Helpers.Extract(response);
+        Assert.Equal("This is the full, real, lengthy answer the agent produced for the user.", text);
     }
 
     // ── Extract: SendMessageResponse with Task payload (legacy fallback) ─────

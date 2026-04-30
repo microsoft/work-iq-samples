@@ -203,9 +203,11 @@ public class ExtractTextTests
     // the legacy status.message path when artifacts are absent.
 
     [Fact]
-    public void ExtractText_TaskArtifacts_PreferredOverStatusMessage()
+    public void ExtractText_TaskWithBothShapes_PrefersStatusMessage()
     {
-        // result.task.artifacts (new) AND result.task.status.message (legacy) both present.
+        // Shape-based rule: when result.task.status.message has text, that's a
+        // pre-fedb1c9 ring still emitting in the legacy location — use it
+        // regardless of what's in artifacts.
         var el = Parse("""
         {
             "task": {
@@ -213,19 +215,47 @@ public class ExtractTextTests
                 "contextId": "ctx-1",
                 "status": {
                     "state": "TASK_STATE_COMPLETED",
-                    "message": { "parts": [{ "text": "LEGACY text" }] }
+                    "message": { "parts": [{ "text": "LEGACY answer" }] }
                 },
                 "artifacts": [
                     {
                         "artifactId": "a1",
                         "name": "Answer",
-                        "parts": [{ "text": "NEW text" }]
+                        "parts": [{ "text": "artifact text" }]
                     }
                 ]
             }
         }
         """);
-        Assert.Equal("NEW text", Helpers.ExtractText(el));
+        Assert.Equal("LEGACY answer", Helpers.ExtractText(el));
+    }
+
+    [Fact]
+    public void ExtractText_TaskWithArtifactFragment_PicksStatusMessage()
+    {
+        // Real rollout case: the artifact carries a tail fragment ("\")" from
+        // a citation marker) while the full answer lives in status.message.
+        // Length-pick correctly returns the status.message text.
+        var el = Parse("""
+        {
+            "task": {
+                "id": "t-frag",
+                "status": {
+                    "state": "TASK_STATE_COMPLETED",
+                    "message": {
+                        "parts": [{ "text": "The actual long answer body the agent produced for the user." }]
+                    }
+                },
+                "artifacts": [
+                    {
+                        "artifactId": "a-frag",
+                        "parts": [{ "text": "\")" }]
+                    }
+                ]
+            }
+        }
+        """);
+        Assert.Equal("The actual long answer body the agent produced for the user.", Helpers.ExtractText(el));
     }
 
     [Fact]
