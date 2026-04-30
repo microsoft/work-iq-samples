@@ -6,7 +6,6 @@ Sample clients for the [Work IQ](https://learn.microsoft.com/en-us/microsoft-365
 |--------|----------|----------|----------|-------------|
 | [**dotnet/a2a/**](dotnet/a2a/) | C# | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Interactive agent session using the A2A protocol over JSON-RPC |
 | [**dotnet/a2a-raw/**](dotnet/a2a-raw/) | C# | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Same, but with raw `HttpClient` + JSON (no A2A SDK) |
-| [**dotnet/rest/**](dotnet/rest/) | C# | Windows, macOS, Linux | REST | Interactive chat using the [Copilot Chat API](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview) |
 | [**rust/a2a/**](rust/a2a/) | Rust | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Interactive agent session with device code auth and token caching |
 | [**swift/a2a/**](swift/a2a/) | Swift | iOS/iPadOS (macOS to build) | [A2A](https://a2a-protocol.org) | SwiftUI chat app with streaming responses |
 
@@ -14,9 +13,7 @@ Sample clients for the [Work IQ](https://learn.microsoft.com/en-us/microsoft-365
 
 ## Gateway
 
-All .NET samples target the **Work IQ Gateway** (`workiq.svc.cloud.microsoft`) — the dedicated entry point for Work IQ and Copilot Chat. Token audience: `api://workiq.svc.cloud.microsoft`; delegated scope: `WorkIQAgent.Ask`.
-
-> The Rust and Swift samples in this repo target Microsoft Graph today and have not been migrated yet.
+All .NET samples target the **Work IQ Gateway** (`workiq.svc.cloud.microsoft`) — the dedicated entry point for Work IQ. Delegated scope: `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask`.
 
 ---
 
@@ -28,7 +25,6 @@ All .NET samples target the **Work IQ Gateway** (`workiq.svc.cloud.microsoft`) �
    - **dotnet/** samples: [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later
    - **rust/** samples: [Rust toolchain](https://rustup.rs/) (stable)
    - **swift/** samples: [Xcode 26+](https://developer.apple.com/xcode/) (macOS only)
-
 ### App registration setup
 
 You (or your tenant admin) must create an Entra app registration with specific permissions, redirect URIs, and consent. This is a ~5-minute task.
@@ -71,6 +67,14 @@ dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
 cd rust/a2a
 cargo run -- --appid <APP_ID>
 # Follow the on-screen instructions to authenticate in a browser.
+```
+
+### Pre-obtained JWT token — all platforms, all samples
+
+Acquire a token externally (e.g. via your own MSAL code) and pass it directly:
+
+```bash
+dotnet run -- --token "<SOME_TOKEN>"
 ```
 
 ---
