@@ -66,6 +66,10 @@ if (token.Equals("WAM", StringComparison.OrdinalIgnoreCase))
 var http = new HttpClient();
 http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+// Opt in to A2A v1.0 wire format. Without this header, the server defaults
+// to the v0.3 dispatcher and v1.0 method names ("SendMessage" /
+// "SendStreamingMessage") return JSON-RPC -32601 "Method not found".
+http.DefaultRequestHeaders.TryAddWithoutValidation("A2A-Version", "1.0");
 
 // ── --list-agents: GET {endpoint}/.agents and exit ───────────────────────
 //
