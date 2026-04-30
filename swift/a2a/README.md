@@ -8,7 +8,6 @@ Targets the **Work IQ Gateway** (`https://workiq.svc.cloud.microsoft/a2a/`) by d
 
 - **Microsoft 365 sign-in** via MSAL (silent + interactive)
 - **A2A v1.0 protocol** over JSON-RPC transport
-- **Streaming responses** via SSE with token-by-token display
 - **Multi-turn conversations** with persistent context
 - **Markdown rendering** in agent responses
 - **Automatic token refresh** between turns
@@ -88,7 +87,7 @@ A2A Chat/
 │   └── ChatMessage.swift          # Chat message data model
 ├── Services/
 │   ├── AuthService.swift          # MSAL auth + AppConfiguration loader
-│   └── A2AService.swift           # A2A client (streaming & sync)
+│   └── A2AService.swift           # A2A client wrapper
 └── Views/
     ├── ContentView.swift          # Routes between Welcome and Chat
     ├── WelcomeView.swift          # Sign-in screen

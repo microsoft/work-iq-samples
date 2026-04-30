@@ -1,9 +1,7 @@
 use a2a_rs_client::{A2aClient, ClientConfig};
-use a2a_rs_core::{Message, SendMessageConfiguration, SendMessageResult, StreamingMessageResult};
+use a2a_rs_core::{Message, SendMessageConfiguration, SendMessageResult};
 use anyhow::{Context, Result};
-use futures_util::Stream;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use std::pin::Pin;
 use std::time::Duration;
 
 /// Thin wrapper around `A2aClient` configured for the Work IQ Gateway (A2A v1.0).
@@ -42,16 +40,6 @@ impl WorkIQClient {
     ) -> Result<SendMessageResult> {
         self.client
             .send_message(message, Some(&self.token), configuration)
-            .await
-    }
-
-    pub async fn send_message_streaming(
-        &self,
-        message: Message,
-        configuration: Option<SendMessageConfiguration>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamingMessageResult>> + Send>>> {
-        self.client
-            .send_message_streaming(message, Some(&self.token), configuration)
             .await
     }
 }

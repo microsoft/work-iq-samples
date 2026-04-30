@@ -1,15 +1,13 @@
 mod a2a;
 mod auth;
 mod config;
-mod gateway;
 
 use a2a::{build_http_client, WorkIQClient};
-use a2a_rs_core::{Message, Part, Role, SendMessageConfiguration, SendMessageResult, StreamingMessageResult};
+use a2a_rs_core::{Message, Part, Role, SendMessageConfiguration, SendMessageResult};
 use auth::{decode_token, AuthManager};
 use clap::Parser;
 use colored::Colorize;
 use config::{Cli, Command, WORKIQ_AUTHORITY, WORKIQ_ENDPOINT, WORKIQ_SCOPES};
-use futures_util::StreamExt;
 
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -47,55 +45,13 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // ── Shared HTTP client (used for gateway GETs + A2A POSTs) ───────
-    let endpoint = cli.endpoint.as_deref().unwrap_or(WORKIQ_ENDPOINT);
+    // ── HTTP + A2A client ────────────────────────────────────────────
     let http = build_http_client(&cli.headers)?;
-
-    // ── --list-agents: print and exit ────────────────────────────────
-    if cli.list_agents {
-        let agents = gateway::list_agents(&http, endpoint, &token).await?;
-        gateway::print_agents(endpoint, &agents);
-        return Ok(());
-    }
-
-    // ── --agent-id: resolve agent card and use agentCard.url ─────────
-    let mut a2a_endpoint = endpoint.to_string();
-    let mut effective_stream = cli.stream;
-    if let Some(agent_id) = cli.agent_id.as_deref() {
-        let card = gateway::fetch_agent_card(&http, endpoint, agent_id, &token).await?;
-
-        if verbosity >= 1 {
-            log_header("AGENT");
-            println!("  id              {agent_id}");
-            println!("  name            {}", card.name);
-            println!("  url             {}", card.url);
-            println!("  streaming       {}", card.capabilities.streaming);
-        }
-
-        if effective_stream && !card.capabilities.streaming {
-            if verbosity >= 1 {
-                println!(
-                    "  {}",
-                    format!(
-                        "note: agent '{}' does not advertise streaming; falling back to sync",
-                        card.name
-                    )
-                    .yellow()
-                );
-            }
-            effective_stream = false;
-        }
-
-        a2a_endpoint = card.url;
-    }
-
-    // ── A2A client + REPL ────────────────────────────────────────────
-    let mut client = WorkIQClient::new(&a2a_endpoint, http, &token)?;
+    let mut client = WorkIQClient::new(WORKIQ_ENDPOINT, http, &token)?;
     let mut context_id: Option<String> = None;
 
     if verbosity >= 1 {
-        let mode = if effective_stream { "Streaming" } else { "Sync" };
-        log_header(&format!("READY — Work IQ Gateway — {mode} — {a2a_endpoint}"));
+        log_header(&format!("READY — Work IQ Gateway — {WORKIQ_ENDPOINT}"));
         if let Some(mgr) = auth_mgr.as_ref() {
             if let Some(acct) = mgr.cached_account().await {
                 println!("  Signed in as {}", acct.cyan());
@@ -147,11 +103,7 @@ async fn main() -> anyhow::Result<()> {
         });
 
         let started = Instant::now();
-        let result = if effective_stream {
-            handle_streaming(&client, message, send_config, &mut context_id, verbosity, &spinner).await
-        } else {
-            handle_sync(&client, message, send_config, &mut context_id, &spinner).await
-        };
+        let result = handle_sync(&client, message, send_config, &mut context_id, &spinner).await;
 
         spinner.stop();
         match result {
@@ -325,104 +277,6 @@ fn join_artifact_text(artifacts: Option<&[a2a_rs_core::Artifact]>) -> String {
         .filter_map(Part::as_text)
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-// ── Streaming handler ────────────────────────────────────────────────────
-
-async fn handle_streaming(
-    client: &WorkIQClient,
-    message: Message,
-    config: Option<SendMessageConfiguration>,
-    context_id: &mut Option<String>,
-    verbosity: u8,
-    spinner: &Spinner,
-) -> anyhow::Result<Option<serde_json::Value>> {
-    let mut stream = client.send_message_streaming(message, config).await?;
-    let mut previous_text = String::new();
-    let mut response_metadata: Option<serde_json::Value> = None;
-
-    while let Some(result) = stream.next().await {
-        let event = match result {
-            Ok(e) => e,
-            Err(e) => {
-                spinner.stop();
-                eprintln!("\n{} {e}", "Stream error:".red());
-                break;
-            }
-        };
-
-        // A2A v1.0 streaming semantics:
-        //   Task           -> initial submitted task (informational)
-        //   StatusUpdate   -> chain-of-thought OR terminal status; the final
-        //                     event carries citation metadata
-        //   ArtifactUpdate -> answer chunks (this is the answer text)
-        //   Message        -> direct message reply (rare in this flow)
-        match event {
-            StreamingMessageResult::Task(task) => {
-                *context_id = Some(task.context_id.clone());
-                if let Some(msg) = task.status.message.as_ref() {
-                    response_metadata = msg.metadata.clone();
-                    if verbosity >= 1 {
-                        print_event_details(&msg.parts, &format!("{:?}", task.status.state));
-                    }
-                }
-                if task.status.state.is_terminal() {
-                    break;
-                }
-            }
-            StreamingMessageResult::Message(msg) => {
-                response_metadata = msg.metadata.clone();
-                spinner.stop();
-                print_delta(&join_text_parts(&msg.parts), &mut previous_text);
-            }
-            StreamingMessageResult::StatusUpdate(evt) => {
-                *context_id = Some(evt.context_id.clone());
-                if let Some(msg) = evt.status.message.as_ref() {
-                    response_metadata = msg.metadata.clone();
-                    if verbosity >= 1 {
-                        print_event_details(&msg.parts, &format!("{:?}", evt.status.state));
-                    }
-                }
-                if evt.status.state.is_terminal() {
-                    break;
-                }
-            }
-            StreamingMessageResult::ArtifactUpdate(evt) => {
-                if let Some(name) = evt.artifact.name.as_ref() {
-                    print!(" [{}]", name.dimmed());
-                }
-                spinner.stop();
-                print_delta(&join_text_parts(&evt.artifact.parts), &mut previous_text);
-            }
-        }
-    }
-
-    println!();
-    Ok(response_metadata)
-}
-
-/// Print only the new text since the last update (delta printing).
-fn print_delta(combined: &str, previous_text: &mut String) {
-    let suffix = combined.strip_prefix(previous_text.as_str()).unwrap_or(combined);
-    print!("{suffix}");
-    *previous_text = combined.to_string();
-    let _ = io::stdout().flush();
-}
-
-/// Log streaming event details at verbosity >= 1 (part types and sizes).
-fn print_event_details(parts: &[Part], state: &str) {
-    let part_descs = parts
-        .iter()
-        .map(|p| match p {
-            Part::Text { text, .. } => format!("TextPart({}c)", text.len()),
-            Part::Data { .. } => "DataPart".to_string(),
-            Part::File { file, .. } => {
-                format!("FilePart({})", file.name.as_deref().unwrap_or("?"))
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" + ");
-    eprintln!("  {}", format!("  [{state}] {part_descs}").dimmed());
 }
 
 // ── Citations ────────────────────────────────────────────────────────────
@@ -821,31 +675,6 @@ mod tests {
         );
         let (text, _, _) = extract_result(&SendMessageResult::Task(task));
         assert!(text.contains("t-data"));
-    }
-
-    // ── print_delta ─────────────────────────────────────────────────
-
-    #[test]
-    fn print_delta_incremental() {
-        let mut prev = String::new();
-        print_delta("Hello", &mut prev);
-        assert_eq!(prev, "Hello");
-        print_delta("Hello world", &mut prev);
-        assert_eq!(prev, "Hello world");
-    }
-
-    #[test]
-    fn print_delta_full_replace() {
-        let mut prev = "old text".to_string();
-        print_delta("completely new", &mut prev);
-        assert_eq!(prev, "completely new");
-    }
-
-    #[test]
-    fn print_delta_empty() {
-        let mut prev = String::new();
-        print_delta("", &mut prev);
-        assert_eq!(prev, "");
     }
 
     // ── Citation ────────────────────────────────────────────────────

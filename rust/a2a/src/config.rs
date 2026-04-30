@@ -25,17 +25,9 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub account: Option<String>,
 
-    /// Override the gateway endpoint (full URL, e.g. https://host/a2a/)
-    #[arg(long, short = 'e', global = true)]
-    pub endpoint: Option<String>,
-
     /// Custom HTTP header in 'Key: Value' format (repeatable)
     #[arg(long = "header", short = 'H', global = true)]
     pub headers: Vec<String>,
-
-    /// Enable streaming mode (SSE)
-    #[arg(long, global = true)]
-    pub stream: bool,
 
     /// Verbosity level (0=quiet, 1=normal, 2=wire)
     #[arg(short, long, global = true, default_value_t = 1)]
@@ -44,17 +36,6 @@ pub struct Cli {
     /// Show raw token in output
     #[arg(long, global = true)]
     pub show_token: bool,
-
-    /// Invoke a specific agent. Fetches `{endpoint}/{agent-id}/.well-known/agent-card.json`
-    /// and POSTs to `agentCard.url`. Without this flag, posts to `--endpoint` directly
-    /// (the gateway's default agent).
-    #[arg(long, short = 'A', global = true)]
-    pub agent_id: Option<String>,
-
-    /// GET `{endpoint}/.agents` and print, then exit (no chat loop).
-    /// Useful for discovering agent IDs to pass to --agent-id.
-    #[arg(long, global = true)]
-    pub list_agents: bool,
 }
 
 #[derive(Subcommand, Debug)]

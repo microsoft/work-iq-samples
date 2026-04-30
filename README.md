@@ -7,8 +7,8 @@ Sample clients for the [Work IQ](https://learn.microsoft.com/en-us/microsoft-365
 | [**dotnet/a2a/**](dotnet/a2a/) | C# | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Interactive agent session using the A2A protocol over JSON-RPC |
 | [**dotnet/a2a-raw/**](dotnet/a2a-raw/) | C# | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Same, but with raw `HttpClient` + JSON (no A2A SDK) |
 | [**dotnet/rest/**](dotnet/rest/) | C# | Windows, macOS, Linux | REST | Interactive chat using the [Copilot Chat API](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview) |
-| [**rust/a2a/**](rust/a2a/) | Rust | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Interactive agent session with MSAL auth, token caching, `--agent-id` and `--list-agents` |
-| [**swift/a2a/**](swift/a2a/) | Swift | iOS/iPadOS (macOS to build) | [A2A](https://a2a-protocol.org) | SwiftUI chat app with streaming responses |
+| [**rust/a2a/**](rust/a2a/) | Rust | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Interactive agent session with MSAL auth and token caching |
+| [**swift/a2a/**](swift/a2a/) | Swift | iOS/iPadOS (macOS to build) | [A2A](https://a2a-protocol.org) | SwiftUI chat app for Work IQ |
 
 ---
 

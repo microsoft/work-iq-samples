@@ -12,7 +12,6 @@ class ChatMessage: Identifiable {
     let id = UUID()
     var text: String
     let isUser: Bool
-    var isComplete = false
     let timestamp = Date()
 
     init(text: String, isUser: Bool) {
