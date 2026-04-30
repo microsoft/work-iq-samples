@@ -9,7 +9,7 @@ namespace WorkIQ.A2A;
 public record A2AArgs(
     string? Token, string? AppId, string? Endpoint, string? Account, string? Tenant,
     string? AgentId,
-    bool ShowToken, bool Stream, bool ListAgents, bool ShowWire,
+    bool ShowToken, bool Stream, bool ShowWire,
     int Verbosity, List<string> Headers, string? Error);
 
 public static class Helpers
@@ -19,7 +19,7 @@ public static class Helpers
     public static A2AArgs ParseArgs(string[] args)
     {
         string? token = null, appId = null, endpoint = null, account = null, tenant = null, agentId = null;
-        bool showToken = false, stream = false, listAgents = false, showWire = false;
+        bool showToken = false, stream = false, showWire = false;
         int verbosity = 1;
         var headers = new List<string>();
 
@@ -47,7 +47,6 @@ public static class Helpers
                     agentId = args[++i]; break;
                 case "--show-token": showToken = true; break;
                 case "--stream": stream = true; break;
-                case "--list-agents": listAgents = true; break;
                 case "--show-wire": showWire = true; break;
                 case "--verbosity" or "-v":
                     if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
@@ -60,9 +59,9 @@ public static class Helpers
             }
         }
 
-        return new A2AArgs(token, appId, endpoint, account, tenant, agentId, showToken, stream, listAgents, showWire, verbosity, headers, null);
+        return new A2AArgs(token, appId, endpoint, account, tenant, agentId, showToken, stream, showWire, verbosity, headers, null);
 
-        static A2AArgs Err(string msg) => new(null, null, null, null, null, null, false, false, false, false, 1, new List<string>(), msg);
+        static A2AArgs Err(string msg) => new(null, null, null, null, null, null, false, false, false, 1, new List<string>(), msg);
     }
 
     // ── Sync response extraction (A2A SDK v1.0 SendMessageResponse) ─────
@@ -80,24 +79,11 @@ public static class Helpers
         _ => ("(no response)", null, null),
     };
 
-    // Sydney's "answer-as-artifact" change (master commit fedb1c9 / PR 5114178)
-    // is mid-rollout. The shape-based discriminator: if Status.Message.Parts has
-    // text, this is a pre-fedb1c9 ring still emitting the answer in the legacy
-    // location — use it. If Status.Message has no text, this is a post-fedb1c9
-    // ring and the answer lives in Artifacts. Some transitional rings populate
-    // both (artifact carries a fragment of citation-marker tail; full answer is
-    // in Status.Message); the rule still picks the right one because we check
-    // Status.Message first.
-    // TODO(post-fedb1c9 WW rollout, ~early May 2026): drop the Status.Message
-    // arm and use Artifacts[].Parts directly.
+    // The agent's answer text is delivered in Artifacts[].Parts (text parts).
+    // Status.Message carries chain-of-thought / progress and metadata, not the
+    // final answer.
     public static string ExtractTextFromTask(AgentTask task)
     {
-        if (task.Status.Message?.Parts is { } msgParts)
-        {
-            var fromStatusMessage = JoinText(msgParts);
-            if (!string.IsNullOrEmpty(fromStatusMessage)) return fromStatusMessage;
-        }
-
         var fromArtifacts = JoinText(
             (task.Artifacts ?? new List<Artifact>()).SelectMany(a => a.Parts));
         if (!string.IsNullOrEmpty(fromArtifacts)) return fromArtifacts;

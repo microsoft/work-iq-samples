@@ -25,7 +25,7 @@ The **Agent-to-Agent (A2A) Protocol** is an open standard for communication betw
      ..\..\scripts\admin-setup.ps1
      ```
    - Otherwise, hand [`../../ADMIN_SETUP.md`](../../ADMIN_SETUP.md) to your admin. They'll give you an **App ID** and **Tenant ID**.
-3. **.NET 10 SDK** or later — [download](https://dotnet.microsoft.com/download/dotnet/10.0).
+3. **.NET 8 SDK** or later — [download](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ## Quick start
 
@@ -57,29 +57,21 @@ The sample then:
 3. Uses `agentCard.url` (not the gateway endpoint) as the target for `A2AClient`.
 4. Falls back to sync mode if `--stream` is set but the agent doesn't advertise streaming (a note prints at `-v >= 1`).
 
-#### How to find an agent ID — `--list-agents`
+<a id="how-to-find-an-agent-id"></a>
+#### How to find an agent ID
 
-Pass `--list-agents` to fetch and print the gateway's agent registry. The sample GETs `{endpoint}/.agents` (a Work IQ / Sydney extension, not part of the A2A spec) and prints `{agentId, name, provider}` for each entry, then exits — no chat loop:
+Use the [WorkIQ CLI](https://www.npmjs.com/package/@microsoft/workiq) to list the agents available to your signed-in user. The list command is currently behind an `experimental` flag:
 
 ```bash
-dotnet run -- --token WAM --list-agents \
-  --appid <APP_ID> --tenant <TENANT_ID>
+npm install -g @microsoft/workiq        # or: dotnet tool install --global WorkIQ
+workiq accept-eula
+workiq config set experimental=true
+workiq list-agents
 ```
 
-Sample output:
+You can also copy the agent ID from the address bar in the [Microsoft 365 Copilot Chat website](https://m365.cloud.microsoft/chat/) — the segment after `/chat/agent/`. Treat the ID as an opaque string.
 
-```
-Agents at https://workiq.svc.cloud.microsoft/a2a/:
-
-  AGENT ID                  NAME              PROVIDER
-  bizchat-as-gpt-scenario   BizChat           Microsoft
-  researcher-v1             Researcher        Microsoft
-  ...
-
-5 agents.
-```
-
-The Work IQ default agent (BizChat-as-GPT scenario) has id `bizchat-as-gpt-scenario` — but you don't need `--agent-id` to invoke it; not specifying any agent already routes there.
+Without `--agent-id`, the sample posts to the gateway's default agent.
 
 ### With a pre-obtained JWT (any platform)
 
@@ -122,9 +114,7 @@ If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and 
 | `--appid, -a` | Entra app client ID (required with `WAM`) |
 | `--tenant, -T` | Tenant ID or domain. Required with `WAM` for single-tenant apps; defaults to `common` for multi-tenant. |
 | `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
-| `--endpoint, -e` | Override the gateway host (scheme + authority only, no path) |
-| `--agent-id, -A` | Invoke a specific agent (fetches `{gateway}/{agent-id}/.well-known/agent-card.json` and posts to `agentCard.url`) |
-| `--list-agents` | GET `{endpoint}/.agents` and print, then exit (no chat loop). Use to discover agent IDs. |
+| `--agent-id, -A` | Invoke a specific agent (fetches `{gateway}/{agent-id}/.well-known/agent-card.json` and posts to `agentCard.url`). See [How to find an agent ID](#how-to-find-an-agent-id) above. |
 | `--show-wire` | Pretty-print raw JSON-RPC request/response bodies and each streaming SSE event as it arrives. Independent of `--verbosity`. Useful for protocol debugging. |
 | `--stream` | Use streaming mode (`SendStreamingMessage` via SSE) |
 | `--header, -H` | Custom request header (repeatable) |
@@ -199,7 +189,7 @@ if (agentMessage.Metadata?.TryGetValue("attributions", out var attrs) == true
 ## A2A protocol notes
 
 - This sample targets **A2A v1.0** wire format: SCREAMING_SNAKE_CASE enums (`ROLE_USER`, `TASK_STATE_COMPLETED`), flat field-presence parts (no `kind` discriminator), and named result wrappers (`result.task`, `result.statusUpdate`, `result.artifactUpdate`). Method names are `SendMessage` / `SendStreamingMessage`.
-- Text comes back via `Artifact.Parts` (preferred path) when targeting Work IQ. The sample also has a small fallback to `Status.Message.Parts` for the brief rollout window where some Sydney rings still emit text in the legacy location — both shapes are tested. The fallback will be removed in a follow-up release once the rollout completes.
+- Answer text comes back in `Artifact.Parts` (sync) or via `ArtifactUpdate` events (streaming). `Status.Message` carries chain-of-thought / progress and citation metadata, not the final answer text.
 - Citations and annotations live in `Status.Message.Metadata["attributions"]`. A subsequent change will move citations to a `DataPart` on the artifact (with media type `application/vnd.workiq-reference`); the sample will be updated when that ships.
 - The sample reconstructs the full accumulated text from streaming chunks by prefix-matching — Work IQ sends cumulative text per chunk, not deltas.
 
@@ -232,7 +222,6 @@ Use `-v 2` to see full HTTP request/response details:
 
 | Symptom | Fix |
 |---------|-----|
-| `400 Invalid request, no valid route` against Work IQ | Pass `--endpoint` as host-only; the sample appends `/a2a/` |
 | Empty response / `[Task ... — Working]` never completes | Increase the client timeout (`Timeout = TimeSpan.FromMinutes(5)` by default in `Program.cs`). Long-running grounded queries can take 30-60s on some rings. |
 | `401 Unauthorized` | Token audience doesn't match the gateway. Check the `aud` claim in the `── TOKEN ──` block. |
 

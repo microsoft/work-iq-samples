@@ -119,33 +119,6 @@ public class ArgParsingTests
     }
 
     [Fact]
-    public void ListAgents_LongFlag_Sets()
-    {
-        var r = Helpers.ParseArgs(["--token", "t", "--list-agents"]);
-        Assert.Null(r.Error);
-        Assert.True(r.ListAgents);
-    }
-
-    [Fact]
-    public void ListAgents_NotProvided_IsFalse()
-    {
-        var r = Helpers.ParseArgs(["--token", "t"]);
-        Assert.Null(r.Error);
-        Assert.False(r.ListAgents);
-    }
-
-    [Fact]
-    public void ListAgents_CombinesWithOtherFlags()
-    {
-        var r = Helpers.ParseArgs(["--token", "t", "--appid", "x", "--list-agents", "--tenant", "common"]);
-        Assert.Null(r.Error);
-        Assert.True(r.ListAgents);
-        Assert.Equal("t", r.Token);
-        Assert.Equal("x", r.AppId);
-        Assert.Equal("common", r.Tenant);
-    }
-
-    [Fact]
     public void ShowWire_LongFlag_Sets()
     {
         var r = Helpers.ParseArgs(["--token", "t", "--show-wire"]);

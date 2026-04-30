@@ -123,33 +123,6 @@ public class ArgParsingTests
     }
 
     [Fact]
-    public void ListAgents_LongFlag_Sets()
-    {
-        var r = Helpers.ParseArgs(["-e", "https://example.com", "-t", "tok", "--list-agents"]);
-        Assert.Null(r.Error);
-        Assert.True(r.ListAgents);
-    }
-
-    [Fact]
-    public void ListAgents_NotProvided_IsFalse()
-    {
-        var r = Helpers.ParseArgs(["-e", "https://example.com", "-t", "tok"]);
-        Assert.Null(r.Error);
-        Assert.False(r.ListAgents);
-    }
-
-    [Fact]
-    public void ListAgents_CombinesWithOtherFlags()
-    {
-        var r = Helpers.ParseArgs(["--endpoint", "https://example.com", "--token", "t", "--appid", "a", "--list-agents"]);
-        Assert.Null(r.Error);
-        Assert.True(r.ListAgents);
-        Assert.Equal("https://example.com", r.Endpoint);
-        Assert.Equal("t", r.Token);
-        Assert.Equal("a", r.AppId);
-    }
-
-    [Fact]
     public void ShowWire_LongFlag_Sets()
     {
         var r = Helpers.ParseArgs(["-e", "https://example.com", "-t", "tok", "--show-wire"]);

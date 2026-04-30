@@ -12,9 +12,9 @@ namespace WorkIQ.A2A.Tests;
 /// Tests for <see cref="Helpers.Extract"/>, <see cref="Helpers.ExtractTextFromTask"/>,
 /// and <see cref="Helpers.JoinText"/> from the a2a sample app.
 ///
-/// Covers the dual-shape text parser introduced for the Sydney "answer-as-artifact"
-/// rollout window: prefer Artifacts[].Parts[Text] when present, fall back to
-/// Status.Message.Parts[Text] for pre-fedb1c9 server responses.
+/// The sample reads answer text from <c>Artifacts[].Parts</c>. Citation
+/// metadata is still read from <c>Status.Message.Metadata</c> (will move to a
+/// DataPart on the artifact in a later server release).
 /// </summary>
 public class ExtractTests
 {
@@ -58,10 +58,10 @@ public class ExtractTests
         Assert.Equal("value", metadata["key"].GetString());
     }
 
-    // ── Extract: SendMessageResponse with Task payload (new artifact shape) ──
+    // ── Extract: SendMessageResponse with Task payload ──────────────────
 
     [Fact]
-    public void Extract_TaskWithArtifactText_PrefersArtifactPath()
+    public void Extract_TaskWithArtifactText_ReturnsArtifactText()
     {
         var task = new AgentTask
         {
@@ -86,163 +86,27 @@ public class ExtractTests
     }
 
     [Fact]
-    public void Extract_TaskWithBothShapes_PrefersStatusMessage()
+    public void Extract_TaskWithMultipleArtifacts_ConcatenatesTextParts()
     {
-        // Shape-based rule: when Status.Message has text we're talking to a
-        // pre-fedb1c9 ring (still emitting the answer in the legacy location).
-        // Use Status.Message regardless of what's in Artifacts.
         var task = new AgentTask
         {
-            Id = "t-both",
-            ContextId = "ctx-both",
-            Status = new global::A2A.TaskStatus
-            {
-                State = TaskState.Completed,
-                Message = new Message
-                {
-                    Role = Role.Agent,
-                    MessageId = "m-status",
-                    Parts = [Part.FromText("LEGACY answer")],
-                },
-            },
+            Id = "t-multi",
+            ContextId = "ctx-multi",
+            Status = new global::A2A.TaskStatus { State = TaskState.Completed },
             Artifacts =
             [
-                new Artifact
-                {
-                    ArtifactId = "a-new",
-                    Parts = [Part.FromText("artifact text")],
-                },
+                new Artifact { ArtifactId = "a1", Parts = [Part.FromText("One")] },
+                new Artifact { ArtifactId = "a2", Parts = [Part.FromText("Two")] },
             ],
         };
         var response = new SendMessageResponse { Task = task };
 
         var (text, _, _) = Helpers.Extract(response);
-        Assert.Equal("LEGACY answer", text);
+        Assert.Equal("One\nTwo", text);
     }
 
     [Fact]
-    public void Extract_TaskWithArtifactFragment_PicksStatusMessage()
-    {
-        // Real-world rollout case: artifact has only a tail fragment of markup
-        // ("\")" leftover from a citation marker) while the full answer is in
-        // Status.Message. Length-pick correctly chooses Status.Message.
-        var task = new AgentTask
-        {
-            Id = "t-frag",
-            ContextId = "ctx-frag",
-            Status = new global::A2A.TaskStatus
-            {
-                State = TaskState.Completed,
-                Message = new Message
-                {
-                    Role = Role.Agent,
-                    MessageId = "m-real",
-                    Parts = [Part.FromText("This is the full, real, lengthy answer the agent produced for the user.")],
-                },
-            },
-            Artifacts =
-            [
-                new Artifact
-                {
-                    ArtifactId = "a-frag",
-                    Parts = [Part.FromText("\")")],
-                },
-            ],
-        };
-        var response = new SendMessageResponse { Task = task };
-
-        var (text, _, _) = Helpers.Extract(response);
-        Assert.Equal("This is the full, real, lengthy answer the agent produced for the user.", text);
-    }
-
-    // ── Extract: SendMessageResponse with Task payload (legacy fallback) ─────
-
-    [Fact]
-    public void Extract_TaskWithOnlyStatusMessageText_FallsBackToLegacy()
-    {
-        // Pre-fedb1c9 Sydney rings still emit text in Status.Message.Parts.
-        // The dual-shape parser must read this when no artifact text is present.
-        var task = new AgentTask
-        {
-            Id = "t-legacy",
-            ContextId = "ctx-legacy",
-            Status = new global::A2A.TaskStatus
-            {
-                State = TaskState.Completed,
-                Message = new Message
-                {
-                    Role = Role.Agent,
-                    MessageId = "m-legacy",
-                    Parts = [Part.FromText("Legacy answer")],
-                },
-            },
-        };
-        var response = new SendMessageResponse { Task = task };
-
-        var (text, contextId, _) = Helpers.Extract(response);
-        Assert.Equal("Legacy answer", text);
-        Assert.Equal("ctx-legacy", contextId);
-    }
-
-    [Fact]
-    public void Extract_TaskWithEmptyArtifacts_FallsBackToLegacy()
-    {
-        var task = new AgentTask
-        {
-            Id = "t-empty-art",
-            ContextId = "ctx-x",
-            Status = new global::A2A.TaskStatus
-            {
-                State = TaskState.Completed,
-                Message = new Message
-                {
-                    Role = Role.Agent,
-                    MessageId = "m-x",
-                    Parts = [Part.FromText("From legacy")],
-                },
-            },
-            Artifacts = [], // empty list — should still fall back
-        };
-        var response = new SendMessageResponse { Task = task };
-
-        var (text, _, _) = Helpers.Extract(response);
-        Assert.Equal("From legacy", text);
-    }
-
-    [Fact]
-    public void Extract_TaskWithArtifactsButNoTextParts_FallsBackToLegacy()
-    {
-        var task = new AgentTask
-        {
-            Id = "t-data-only",
-            ContextId = "ctx-d",
-            Status = new global::A2A.TaskStatus
-            {
-                State = TaskState.Completed,
-                Message = new Message
-                {
-                    Role = Role.Agent,
-                    MessageId = "m-d",
-                    Parts = [Part.FromText("Use legacy")],
-                },
-            },
-            Artifacts =
-            [
-                new Artifact
-                {
-                    ArtifactId = "a-d",
-                    Parts = [Part.FromData(JsonDocument.Parse("{\"k\":\"v\"}").RootElement)],
-                },
-            ],
-        };
-        var response = new SendMessageResponse { Task = task };
-
-        var (text, _, _) = Helpers.Extract(response);
-        Assert.Equal("Use legacy", text);
-    }
-
-    [Fact]
-    public void Extract_TaskCompletedNoText_ReturnsStatusPlaceholder()
+    public void Extract_TaskCompletedNoArtifacts_ReturnsStatusPlaceholder()
     {
         var task = new AgentTask
         {
@@ -274,6 +138,32 @@ public class ExtractTests
         Assert.Contains("t-working", text);
         Assert.Contains("Working", text);
         Assert.Equal("ctx-w", contextId);
+    }
+
+    [Fact]
+    public void Extract_TaskWithDataOnlyArtifacts_ReturnsStatusPlaceholder()
+    {
+        // Artifact has only a DataPart (no text) — the sample shows the task
+        // status as a placeholder rather than the JSON.
+        var task = new AgentTask
+        {
+            Id = "t-data-only",
+            ContextId = "ctx-d",
+            Status = new global::A2A.TaskStatus { State = TaskState.Completed },
+            Artifacts =
+            [
+                new Artifact
+                {
+                    ArtifactId = "a-d",
+                    Parts = [Part.FromData(JsonDocument.Parse("{\"k\":\"v\"}").RootElement)],
+                },
+            ],
+        };
+        var response = new SendMessageResponse { Task = task };
+
+        var (text, _, _) = Helpers.Extract(response);
+        Assert.Contains("t-data-only", text);
+        Assert.Contains("Completed", text);
     }
 
     [Fact]

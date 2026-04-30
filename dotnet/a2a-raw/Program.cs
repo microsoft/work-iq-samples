@@ -4,12 +4,10 @@
 // WorkIQ A2A Raw Sample — Minimal A2A client using only HttpClient + JSON
 // No A2A SDK. Shows exactly what goes over the wire (JSON-RPC v0.3 format).
 //
-// Defaults target the Work IQ Gateway (`https://workiq.svc.cloud.microsoft/a2a/`).
-// Override --endpoint + --scope to target any other A2A endpoint.
+// Targets the Work IQ Gateway (`https://workiq.svc.cloud.microsoft/a2a/`).
 //
 // Usage:
 //   dotnet run -- --token <JWT|WAM> --appid <client-id> [--account user@tenant.com] [--stream]
-//   dotnet run -- --endpoint <agent-url> --token <JWT> [--stream]
 
 using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
@@ -34,7 +32,7 @@ if (parsed.Error != null)
 string endpoint = parsed.Endpoint ?? "https://workiq.svc.cloud.microsoft/a2a/";
 string scope = parsed.Scope ?? "api://workiq.svc.cloud.microsoft/.default";
 string? token = parsed.Token, appId = parsed.AppId, account = parsed.Account, tenant = parsed.Tenant, agentId = parsed.AgentId;
-bool stream = parsed.Stream, allHeaders = parsed.AllHeaders, listAgents = parsed.ListAgents, showWire = parsed.ShowWire;
+bool stream = parsed.Stream, allHeaders = parsed.AllHeaders, showWire = parsed.ShowWire;
 
 if (string.IsNullOrEmpty(token))
 {
@@ -70,64 +68,6 @@ http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("appli
 // to the v0.3 dispatcher and v1.0 method names ("SendMessage" /
 // "SendStreamingMessage") return JSON-RPC -32601 "Method not found".
 http.DefaultRequestHeaders.TryAddWithoutValidation("A2A-Version", "1.0");
-
-// ── --list-agents: GET {endpoint}/.agents and exit ───────────────────────
-//
-// {endpoint}/.agents is a Work IQ / Sydney extension (not part of the A2A
-// spec) returning an array of {agentId, name, provider} entries. Useful for
-// discovering IDs to pass to --agent-id.
-if (listAgents)
-{
-    var listUri = $"{endpoint.TrimEnd('/')}/.agents";
-    HttpResponseMessage listRes;
-    try { listRes = await http.GetAsync(listUri); }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"ERROR: failed to GET {listUri}: {ex.Message}");
-        return;
-    }
-
-    if (!listRes.IsSuccessStatusCode)
-    {
-        var body = await listRes.Content.ReadAsStringAsync();
-        Console.Error.WriteLine($"ERROR: {(int)listRes.StatusCode} {listRes.ReasonPhrase} from {listUri}");
-        if (!string.IsNullOrWhiteSpace(body)) Console.Error.WriteLine($"  {body.Trim()}");
-        return;
-    }
-
-    var listJson = await listRes.Content.ReadAsStringAsync();
-    using var listDoc = JsonDocument.Parse(listJson);
-    if (listDoc.RootElement.ValueKind != JsonValueKind.Array)
-    {
-        Console.Error.WriteLine($"ERROR: expected JSON array from {listUri}, got {listDoc.RootElement.ValueKind}");
-        return;
-    }
-
-    var rows = listDoc.RootElement.EnumerateArray()
-        .Select(e => (
-            Id: e.TryGetProperty("agentId", out var id) ? id.GetString() ?? "" : "",
-            Name: e.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "",
-            Provider: e.TryGetProperty("provider", out var p) ? p.GetString() ?? "" : ""))
-        .ToList();
-
-    Console.WriteLine();
-    Console.WriteLine($"Agents at {endpoint}:");
-    Console.WriteLine();
-    if (rows.Count == 0)
-    {
-        Console.WriteLine("  (none)");
-        return;
-    }
-
-    int wId = Math.Max(8, rows.Max(r => r.Id.Length));
-    int wName = Math.Max(4, rows.Max(r => r.Name.Length));
-    Console.WriteLine($"  {"AGENT ID".PadRight(wId)}  {"NAME".PadRight(wName)}  PROVIDER");
-    foreach (var r in rows)
-        Console.WriteLine($"  {r.Id.PadRight(wId)}  {r.Name.PadRight(wName)}  {r.Provider}");
-    Console.WriteLine();
-    Console.WriteLine($"{rows.Count} agent{(rows.Count == 1 ? "" : "s")}.");
-    return;
-}
 
 // ── Agent card resolution (when --agent-id is set) ───────────────────────
 //
@@ -350,9 +290,8 @@ async Task SyncResponse(HttpClient client, string ep, HttpContent body, Cancella
     }
 }
 
-// Walks a v1.0 `result` envelope for the contextId. Looks at task.contextId,
-// message.contextId, statusUpdate.contextId, artifactUpdate.contextId, and
-// (legacy) status.message.contextId.
+// Walks a v1.0 `result` envelope for the contextId. v1.0 places contextId on
+// task / message / statusUpdate / artifactUpdate directly.
 static string? ExtractContextId(JsonElement el)
 {
     static string? Get(JsonElement e) => e.TryGetProperty("contextId", out var c) ? c.GetString() : null;
@@ -362,10 +301,6 @@ static string? ExtractContextId(JsonElement el)
         if (el.TryGetProperty(key, out var inner) && Get(inner) is { } id)
             return id;
     }
-    if (el.TryGetProperty("task", out var task) &&
-        task.TryGetProperty("status", out var status) &&
-        status.TryGetProperty("message", out var msg) &&
-        Get(msg) is { } legacyId) return legacyId;
     return Get(el);
 }
 
@@ -397,9 +332,7 @@ async Task StreamResponse(HttpClient client, string ep, HttpContent body, Cancel
     var responseStream = await res.Content.ReadAsStreamAsync();
     using var reader = new StreamReader(responseStream);
 
-    // A2A v1.0 streaming semantics (no dual-shape concern in streaming —
-    // Sydney's fedb1c9 only changed the sync path; streaming has used
-    // ArtifactUpdate events for the answer text from the start):
+    // A2A v1.0 streaming semantics:
     //   result.task            -> initial submitted task (informational)
     //   result.statusUpdate    -> chain-of-thought OR terminal status; the
     //                             final event carries citation metadata
@@ -606,14 +539,11 @@ void PrintUsage()
       --token, -t      Bearer JWT token, or 'WAM' for Windows broker auth
 
     Options:
-      --endpoint, -e   Agent URL. Defaults to the Work IQ Gateway A2A endpoint:
-                       https://workiq.svc.cloud.microsoft/a2a/
-                       Override to target a different A2A endpoint.
       --agent-id, -A   Invoke a specific agent. The sample fetches
-                       {endpoint}/{agent-id}/.well-known/agent-card.json,
+                       <gateway>/<agent-id>/.well-known/agent-card.json,
                        reads agentCard.url, and POSTs JSON-RPC there.
-                       Without --agent-id, the sample posts directly to
-                       --endpoint (default agent for that gateway).
+                       Without --agent-id, the sample posts to the
+                       Work IQ Gateway A2A endpoint (default agent).
       --scope, -s      Token scope for WAM. Defaults to the Work IQ audience:
                        api://workiq.svc.cloud.microsoft/.default
       --appid, -a      App client ID (required with WAM)
@@ -622,7 +552,6 @@ void PrintUsage()
                        defaults to 'common' for multi-tenant apps)
       --stream         Use streaming mode (SSE via message/stream)
       --all-headers    Print all response headers (default: key diagnostics only)
-      --list-agents    GET {endpoint}/.agents and print, then exit (no chat loop)
       --show-wire      Pretty-print raw JSON-RPC request/response bodies (and each
                        streaming SSE `data:` event as it arrives).
 
@@ -631,7 +560,6 @@ void PrintUsage()
       dotnet run -- -t WAM -a <appid>
 
       # List agents (discover IDs to use with --agent-id)
-      dotnet run -- -t WAM -a <appid> --list-agents
 
       # Invoke a specific agent
       dotnet run -- -t WAM -a <appid> --agent-id <AGENT_ID>

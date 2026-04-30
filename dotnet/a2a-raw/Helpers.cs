@@ -9,7 +9,7 @@ namespace WorkIQ.A2ARaw;
 public record RawArgs(
     string? Endpoint, string? Token, string? AppId, string? Account,
     string? Scope, string? Tenant, string? AgentId,
-    bool Stream, bool AllHeaders, bool ListAgents, bool ShowWire, string? Error);
+    bool Stream, bool AllHeaders, bool ShowWire, string? Error);
 
 public static class Helpers
 {
@@ -18,7 +18,7 @@ public static class Helpers
     public static RawArgs ParseArgs(string[] args)
     {
         string? endpoint = null, token = null, appId = null, account = null, scope = null, tenant = null, agentId = null;
-        bool stream = false, allHeaders = false, listAgents = false, showWire = false;
+        bool stream = false, allHeaders = false, showWire = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -47,75 +47,44 @@ public static class Helpers
                     agentId = args[++i]; break;
                 case "--stream": stream = true; break;
                 case "--all-headers": allHeaders = true; break;
-                case "--list-agents": listAgents = true; break;
                 case "--show-wire": showWire = true; break;
                 default:
                     return Err($"Unknown flag: {args[i]}");
             }
         }
 
-        return new RawArgs(endpoint, token, appId, account, scope, tenant, agentId, stream, allHeaders, listAgents, showWire, null);
+        return new RawArgs(endpoint, token, appId, account, scope, tenant, agentId, stream, allHeaders, showWire, null);
 
-        static RawArgs Err(string msg) => new(null, null, null, null, null, null, null, false, false, false, false, msg);
+        static RawArgs Err(string msg) => new(null, null, null, null, null, null, null, false, false, false, msg);
     }
 
     // ── A2A v1.0 response text extraction ──────────────────────────────────
     //
-    // Walks an unwrapped JSON-RPC `result` object (or a single streaming event)
-    // and returns the response text. Tries the v1.0 shapes in preference order:
-    //   1. result.task.artifacts[].parts[text]                 ← sync, post-fedb1c9 (preferred)
-    //   2. result.task.status.message.parts[text]              ← sync, pre-fedb1c9 (legacy fallback)
-    //   3. result.message.parts[text]                          ← sync, direct Message payload
-    //   4. result.artifactUpdate.artifact.parts[text]          ← streaming, post-fedb1c9 (preferred)
-    //   5. result.statusUpdate.status.message.parts[text]      ← streaming, pre-fedb1c9 (legacy fallback)
-    //   6. <root>.parts[text]                                  ← already-unwrapped (caller convenience)
-    //   7. <root>.status.message.parts[text]                   ← already-unwrapped (legacy)
+    // Walks an unwrapped JSON-RPC `result` object and returns the answer text.
+    // The agent's answer is in artifacts (sync) or arrives via artifactUpdate
+    // events (streaming). Status / statusUpdate carry chain-of-thought and
+    // terminal-state metadata, not the final answer text.
     //
-    // TODO(post-fedb1c9 WW rollout, ~early May 2026): drop the legacy fallback
-    // branches (#2, #5, #7) once Sydney's "answer-as-artifact" change has fully
-    // rolled out. Tracking: Sydney master commit fedb1c9 / PR 5114178.
+    // Shapes handled:
+    //   - result.task.artifacts[].parts[text]            ← sync
+    //   - result.message.parts[text]                     ← sync, direct Message payload
+    //   - result.artifactUpdate.artifact.parts[text]     ← streaming chunk
 
     public static string ExtractText(JsonElement el)
     {
-        // 1, 2: sync `task` payload. Use the shape-based discriminator: if
-        // status.message.parts has text, the server is still on the legacy
-        // emission path (pre-fedb1c9) — use it. If status.message is empty,
-        // the answer lives in artifacts (post-fedb1c9). Some transitional
-        // rings populate both (artifact carries a fragment while status.
-        // message has the full answer); the legacy-first check correctly
-        // picks the full answer.
-        if (el.TryGetProperty("task", out var task))
-        {
-            if (task.TryGetProperty("status", out var status) &&
-                status.TryGetProperty("message", out var msg) &&
-                TryGetParts(msg, out var fromStatusMessage))
-                return fromStatusMessage;
+        // Sync `task` payload — answer text lives in artifacts.
+        if (el.TryGetProperty("task", out var task) &&
+            TryGetArtifactsText(task, out var fromArtifacts))
+            return fromArtifacts;
 
-            if (TryGetArtifactsText(task, out var fromArtifacts)) return fromArtifacts;
-        }
-
-        // 3: sync `message` payload (direct reply, no task).
+        // Sync `message` payload (direct reply, no task).
         if (el.TryGetProperty("message", out var m) && TryGetParts(m, out var msgText))
             return msgText;
 
-        // 4: streaming `artifactUpdate` — extract text from the artifact's parts.
+        // Streaming `artifactUpdate` — text from the artifact's parts.
         if (el.TryGetProperty("artifactUpdate", out var au) &&
             au.TryGetProperty("artifact", out var artifact) &&
             TryGetParts(artifact, out var auText)) return auText;
-
-        // 5: streaming `statusUpdate` legacy — text in status.message.parts.
-        if (el.TryGetProperty("statusUpdate", out var su) &&
-            su.TryGetProperty("status", out var sStatus) &&
-            sStatus.TryGetProperty("message", out var sMsg) &&
-            TryGetParts(sMsg, out var suText)) return suText;
-
-        // 6: caller passed an already-unwrapped object with parts at the root.
-        if (TryGetParts(el, out var directText)) return directText;
-
-        // 7: caller passed a task/agent-message-shaped object with status.message.parts.
-        if (el.TryGetProperty("status", out var status2) &&
-            status2.TryGetProperty("message", out var msg2) &&
-            TryGetParts(msg2, out var legacyText2)) return legacyText2;
 
         return "";
     }
