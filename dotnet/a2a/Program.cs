@@ -31,7 +31,6 @@ else
 if (config.Verbosity >= 1)
 {
     Log("TOKEN");
-    DecodeToken(token);
     if (config.ShowToken) Console.WriteLine($"\n  {token}\n");
 }
 
@@ -330,26 +329,6 @@ static async Task<(string token, IPublicClientApplication app, IAccount? account
     }
 
     return (result.AccessToken, app, result.Account);
-}
-
-// ── Token decode ─────────────────────────────────────────────────────────
-
-static void DecodeToken(string token)
-{
-    try
-    {
-        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
-        foreach (var c in new[] { "aud", "appid", "app_displayname", "tid", "upn", "name", "scp" })
-        {
-            var v = jwt.Claims.FirstOrDefault(x => x.Type == c)?.Value;
-            if (!string.IsNullOrEmpty(v)) Console.WriteLine($"  {c,-16} {v}");
-        }
-
-        var left = jwt.ValidTo - DateTime.UtcNow;
-        Ink($"  {"expires",-16} {jwt.ValidTo:HH:mm:ss} UTC ({(left.TotalMinutes > 0 ? $"{left.TotalMinutes:F0}m" : "EXPIRED")})\n",
-            left.TotalMinutes < 5 ? ConsoleColor.Red : ConsoleColor.Gray);
-    }
-    catch (Exception ex) { Ink($"  decode failed: {ex.Message}\n", ConsoleColor.Red); }
 }
 
 // ── Args ─────────────────────────────────────────────────────────────────

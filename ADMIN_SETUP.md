@@ -26,7 +26,7 @@ Flags:
 
 | Flag | Meaning |
 |------|---------|
-| `--name "My Name"` / `-Name` | Custom app display name. Default: `Work IQ Samples Client`. |
+| `--name "My Application Name"` / `-Name` | Custom app display name. Default: `Work IQ Samples Client`. |
 | `--tenant <id>` / `-Tenant` | Target tenant (must match your current `az login` context). |
 | `--multi-tenant` / `-MultiTenant` | Configure as multi-tenant (`AzureADMultipleOrgs`). Default is single-tenant. |
 | `--dry-run` / `-DryRun` | Print commands without running them. |
@@ -40,10 +40,10 @@ When it finishes, it prints the **App ID** and **Tenant ID**. Give those two val
 
 ## Option B — Azure CLI, step by step
 
-If you want to see exactly what the script does (or need to customize), these are the six commands. Replace `<APP_ID>` with the value returned in step 2.
+If you want to see exactly what the script does (or need to customize), these are the six commands.
 
 ```bash
-# 1. Ensure the Work IQ service principal exists in your tenant (JIT provisioning).
+# 1. Ensure the Work IQ service principal exists in your tenant.
 #    Harmless if it already exists.
 az ad sp create --id fdcc1f02-fc51-4226-8753-f668596af7f7
 
@@ -58,7 +58,7 @@ echo "App ID: $APP_ID"
 # 3. Create the service principal for the app itself.
 az ad sp create --id $APP_ID
 
-# 4. Configure the three public-client redirect URIs.
+# 4. Configure the public-client redirect URIs as needed for your scenario.
 #    - http://localhost: browser interactive fallback
 #    - nativeclient: legacy MSAL native
 #    - brokerplugin: WAM broker on Windows (required for .NET WAM auth)
@@ -72,7 +72,7 @@ az ad app update --id $APP_ID \
 az ad app permission add --id $APP_ID \
   --api fdcc1f02-fc51-4226-8753-f668596af7f7 \
   --api-permissions "0b1715fd-f4bf-4c63-b16d-5be31f9847c2=Scope"
-# Adds: WorkIQAgent.Ask
+# Adds: api://workiqagent.svc.cloud.microsoft/WorkIQAgent.Ask
 
 # 6. Grant admin consent for the delegated permission added above.
 az ad app permission admin-consent --id $APP_ID
@@ -101,7 +101,7 @@ az account show --query tenantId -o tsv
 8. Back on **API permissions**, click **Grant admin consent for [your tenant]**. Confirm. The row should show ✔️ Granted.
 9. **Microsoft Entra ID** → **Overview** → copy the **Tenant ID**.
 
-Step 8 also JIT-provisions the Work IQ service principal. If it doesn't (rare), run:
+Step 8 also provisions the Work IQ service principal. If it doesn't (rare), run:
 
 ```bash
 az ad sp create --id fdcc1f02-fc51-4226-8753-f668596af7f7
@@ -119,7 +119,7 @@ Microsoft publishes Work IQ as a multi-tenant app (`fdcc1f02-fc51-4226-8753-f668
 
 - The app registration is a **public client** — no client secret, no certificate.
 - Auth flows used by the samples are **user-delegated**: the signed-in user's own permissions determine what data is returned.
-- For **service-to-service** scenarios (unattended, daemon, backend jobs), these samples are not the right starting point. Use a confidential-client app with certificates and `.default` application scopes, and follow [application-permissions](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-client-creds-grant-flow).
+- For **service-to-service** scenarios (unattended, daemon, backend service), these samples are not the right starting point. Use a confidential-client app with certificates and `.default` application scopes, and follow [application-permissions](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-client-creds-grant-flow).
 - Default is **single-tenant** — only users in your own tenant can sign in. Use `--multi-tenant` only if you have a specific cross-tenant scenario.
 
 ---
@@ -130,17 +130,6 @@ Microsoft publishes Work IQ as a multi-tenant app (`fdcc1f02-fc51-4226-8753-f668
 2. **Tenant ID** — the GUID from `az account show --query tenantId -o tsv` (or portal step 9).
 
 The developer will use these in the sample's `--appid` and `--tenant` flags.
-
----
-
-## Sample-specific scripts (already in the repo)
-
-Two folders contain their own setup helpers for language-specific reasons:
-
-- **`rust/a2a/setup-app-registration.sh`** — setup for the Rust device-code sample (Graph-targeted; no WAM, no redirect URIs).
-- **`swift/a2a/setup-app-registration.sh`** — Graph-targeted; adds an iOS-specific redirect URI (`msauth.app.blueglass.A2A-Chat://auth`) and generates `Configuration.plist`.
-
-The unified `scripts/admin-setup.sh` above is for the .NET samples (Work IQ Gateway). The Rust and Swift samples target Microsoft Graph and use their own scripts.
 
 ---
 

@@ -210,7 +210,7 @@ Text accumulates across events (not incremental deltas). The sample diffs agains
 | `Microsoft.Identity.Client` | MSAL token acquisition |
 | `Microsoft.Identity.Client.Broker` | Windows WAM broker |
 
-That's it — no A2A SDK, no JWT decoder.
+That's it — no A2A SDK.
 
 ## Sample-specific troubleshooting
 
