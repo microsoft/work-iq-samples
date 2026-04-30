@@ -216,6 +216,13 @@ static async Task<(string token, IPublicClientApplication app, IAccount? account
 }
 
 // ── Token decode ─────────────────────────────────────────────────────────
+//
+// DO NOT DECODE ACCESS TOKENS IN A PRODUCTION APP — Entra defines access
+// tokens as opaque to clients (only the resource / audience may parse them),
+// and their format may change with no notice. We decode here purely as a
+// developer convenience to surface aud/scp/expiry while you're getting the
+// sample running. In your own client, treat the token as a bearer string
+// and let the resource service validate it.
 
 static void DecodeToken(string token)
 {
