@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>ClientId</key>
+    <string>YOUR_APP_CLIENT_ID</string>
+    <key>RedirectUri</key>
+    <string>YOUR_REDIRECT_URI</string>
+    <key>TenantId</key>
+    <string>common</string>
+    <key>Scopes</key>
+    <array>
+        <string>https://graph.microsoft.com/.default</string>
+    </array>
+    <key>Endpoint</key>
+    <string>YOUR_ENDPOINT_URL</string>
+</dict>
+</plist>
