@@ -17,7 +17,7 @@ Use this sample when you want to understand the A2A protocol at the HTTP level, 
 | **Dependencies** | A2A NuGet SDK + MSAL | MSAL only |
 | **Protocol handling** | SDK manages JSON-RPC, SSE parsing, types | Raw `HttpClient` + `JsonDocument` |
 | **Lines of code** | ~480 | ~280 |
-| **Best for** | Production apps, full A2A features | Learning, debugging, minimal integration |
+| **Recommended for** | Any .NET integration with Work IQ | Reading the protocol on the wire; reference for porting to languages without an A2A SDK. **Not intended for production use.** |
 
 ## Prerequisites
 
@@ -91,6 +91,7 @@ If `--stream` is set but the agent's card has `capabilities.streaming = false`, 
 
 This is the [A2A AgentCard schema](https://a2a-protocol.org/latest/specification/#agent-card). Useful as a porting reference if you're implementing this in another language.
 
+<a id="how-to-find-an-agent-id"></a>
 #### How to find an agent ID
 
 Use the [WorkIQ CLI](https://www.npmjs.com/package/@microsoft/workiq) to list the agents available to your signed-in user. The list command is currently behind an `experimental` flag:
@@ -140,7 +141,7 @@ You > quit
 | `--appid, -a` | Entra app client ID (required with `WAM`) |
 | `--tenant, -T` | Tenant ID or domain. Required with `WAM` for single-tenant apps; defaults to `common` for multi-tenant. |
 | `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
-| `--agent-id, -A` | Invoke a specific agent (fetches `.well-known/agent-card.json` and POSTs to `agentCard.url`). See [*How to find an agent ID*](#how-to-find-an-agent-id) above. |
+| `--agent-id, -A` | Invoke a specific agent (fetches `.well-known/agent-card.json` and POSTs to `agentCard.url`). See [How to find an agent ID](#how-to-find-an-agent-id) above. |
 | `--show-wire` | Pretty-print raw JSON-RPC request/response bodies and each streaming SSE `data:` event as it arrives. Useful for protocol debugging. |
 | `--stream` | Use streaming mode (`SendStreamingMessage` via SSE) |
 | `--all-headers` | Print every response header (default: only diagnostic ones) |
