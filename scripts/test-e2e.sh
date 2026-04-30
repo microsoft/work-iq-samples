@@ -12,13 +12,12 @@ set -euo pipefail
 #
 # Usage:
 #   scripts/test-e2e.sh --account user@tenant.com
-#   scripts/test-e2e.sh --account user@tenant.com --modes sync
-#   scripts/test-e2e.sh --account user@tenant.com --samples rest,a2a --keep-app
+#   scripts/test-e2e.sh --account user@tenant.com --samples a2a --keep-app
 #
 # Flags:
 #   --account <email>    Required. The user signing in via WAM.
-#   --samples <list>     Comma-separated: rest,a2a,a2a-raw (default: all)
-#   --modes <list>       Comma-separated: sync,stream (default: both)
+#   --samples <list>     Comma-separated: a2a,a2a-raw (default: all)
+#   --modes <list>       Comma-separated: sync,stream (default: sync)
 #   --name <name>        App display name (default: "WIQ E2E Test <timestamp>")
 #   --tenant <id>        Tenant ID (auto-detected from az account show)
 #   --skip-build         Skip `dotnet build` (assume already built)
@@ -26,12 +25,12 @@ set -euo pipefail
 #   --appid <guid>       Existing App ID (requires --skip-setup)
 #   --keep-app           Don't delete the app on exit
 #   --log-dir <path>     Where to write per-run logs (default: ./test-logs)
-#   --agent-id <id>      Pass --agent-id to a2a + a2a-raw runs (REST ignores it)
+#   --agent-id <id>      Pass --agent-id to a2a + a2a-raw runs
 
 # ── Defaults ────────────────────────────────────────────────────────────
 ACCOUNT=""
-SAMPLES="rest,a2a,a2a-raw"
-MODES="sync,stream"
+SAMPLES="a2a,a2a-raw"
+MODES="sync"
 APP_NAME="WIQ E2E Test $(date +%Y%m%d-%H%M%S)"
 TENANT_ID=""
 SKIP_BUILD="false"
@@ -205,13 +204,13 @@ run_sample() {
   local stream_flag=""
   [[ "$mode" == "stream" ]] && stream_flag="--stream"
 
-  # When --agent-id is provided, append it to a2a / a2a-raw commands (REST doesn't support it)
+  # When --agent-id is provided, append it to the run.
   local agent_flag=""
-  [[ -n "$AGENT_ID" && "$sample" != "rest" ]] && agent_flag="--agent-id $AGENT_ID"
+  [[ -n "$AGENT_ID" ]] && agent_flag="--agent-id $AGENT_ID"
 
   local cmd
   case "$sample" in
-    rest|a2a|a2a-raw)
+    a2a|a2a-raw)
       cmd=(dotnet run --project "$project" --
            --token WAM
            --appid "$APP_ID"
