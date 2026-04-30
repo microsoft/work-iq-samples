@@ -189,7 +189,7 @@ if (agentMessage.Metadata?.TryGetValue("attributions", out var attrs) == true
 ## A2A protocol notes
 
 - This sample targets **A2A v1.0** wire format: SCREAMING_SNAKE_CASE enums (`ROLE_USER`, `TASK_STATE_COMPLETED`), flat field-presence parts (no `kind` discriminator), and named result wrappers (`result.task`, `result.statusUpdate`, `result.artifactUpdate`). Method names are `SendMessage` / `SendStreamingMessage`.
-- Text comes back via `Artifact.Parts` (preferred path) when targeting Work IQ. The sample also has a small fallback to `Status.Message.Parts` for the brief rollout window where some Sydney rings still emit text in the legacy location — both shapes are tested. The fallback will be removed in a follow-up release once the rollout completes.
+- Answer text comes back in `Artifact.Parts` (sync) or via `ArtifactUpdate` events (streaming). `Status.Message` carries chain-of-thought / progress and citation metadata, not the final answer text.
 - Citations and annotations live in `Status.Message.Metadata["attributions"]`. A subsequent change will move citations to a `DataPart` on the artifact (with media type `application/vnd.workiq-reference`); the sample will be updated when that ships.
 - The sample reconstructs the full accumulated text from streaming chunks by prefix-matching — Work IQ sends cumulative text per chunk, not deltas.
 

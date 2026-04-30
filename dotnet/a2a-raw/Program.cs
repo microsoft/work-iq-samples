@@ -292,9 +292,8 @@ async Task SyncResponse(HttpClient client, string ep, HttpContent body, Cancella
     }
 }
 
-// Walks a v1.0 `result` envelope for the contextId. Looks at task.contextId,
-// message.contextId, statusUpdate.contextId, artifactUpdate.contextId, and
-// (legacy) status.message.contextId.
+// Walks a v1.0 `result` envelope for the contextId. v1.0 places contextId on
+// task / message / statusUpdate / artifactUpdate directly.
 static string? ExtractContextId(JsonElement el)
 {
     static string? Get(JsonElement e) => e.TryGetProperty("contextId", out var c) ? c.GetString() : null;
@@ -304,10 +303,6 @@ static string? ExtractContextId(JsonElement el)
         if (el.TryGetProperty(key, out var inner) && Get(inner) is { } id)
             return id;
     }
-    if (el.TryGetProperty("task", out var task) &&
-        task.TryGetProperty("status", out var status) &&
-        status.TryGetProperty("message", out var msg) &&
-        Get(msg) is { } legacyId) return legacyId;
     return Get(el);
 }
 
@@ -339,9 +334,7 @@ async Task StreamResponse(HttpClient client, string ep, HttpContent body, Cancel
     var responseStream = await res.Content.ReadAsStreamAsync();
     using var reader = new StreamReader(responseStream);
 
-    // A2A v1.0 streaming semantics (no dual-shape concern in streaming —
-    // Sydney's fedb1c9 only changed the sync path; streaming has used
-    // ArtifactUpdate events for the answer text from the start):
+    // A2A v1.0 streaming semantics:
     //   result.task            -> initial submitted task (informational)
     //   result.statusUpdate    -> chain-of-thought OR terminal status; the
     //                             final event carries citation metadata

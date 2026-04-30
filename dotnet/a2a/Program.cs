@@ -145,10 +145,6 @@ while (true)
             //                    The full answer is the concatenation of all
             //                    Append=true parts (with replaces applied) for
             //                    each ArtifactId.
-            //
-            // No dual-shape rule needed in streaming: Sydney's fedb1c9 change
-            // (PR 5114178) only modified the sync path. Streaming has used
-            // ArtifactUpdate events for the answer text from the start.
             var artifactBuffers = new Dictionary<string, StringBuilder>();
             var lastChainOfThought = string.Empty;
 

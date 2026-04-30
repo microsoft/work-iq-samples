@@ -19,41 +19,169 @@ public class ExtractTextTests
         return doc.RootElement.Clone();
     }
 
-    // ── ExtractText tests ───────────────────────────────────────────────
+    // ── ExtractText: result.task.artifacts (sync) ───────────────────────
 
     [Fact]
-    public void ExtractText_DirectParts_ReturnsText()
-    {
-        var el = Parse("""{ "parts": [{ "text": "Hello world" }] }""");
-        Assert.Equal("Hello world", Helpers.ExtractText(el));
-    }
-
-    [Fact]
-    public void ExtractText_StatusMessageParts_ReturnsText()
+    public void ExtractText_TaskWithArtifactText_ReturnsArtifactText()
     {
         var el = Parse("""
         {
-            "status": {
-                "message": {
-                    "parts": [{ "text": "Task completed" }]
+            "task": {
+                "id": "t1",
+                "contextId": "ctx-1",
+                "status": { "state": "TASK_STATE_COMPLETED" },
+                "artifacts": [
+                    {
+                        "artifactId": "a1",
+                        "name": "Answer",
+                        "parts": [{ "text": "Answer from artifact" }]
+                    }
+                ]
+            }
+        }
+        """);
+        Assert.Equal("Answer from artifact", Helpers.ExtractText(el));
+    }
+
+    [Fact]
+    public void ExtractText_TaskArtifactsAcrossMultipleArtifacts_AllConcatenated()
+    {
+        var el = Parse("""
+        {
+            "task": {
+                "id": "t-multi",
+                "artifacts": [
+                    { "artifactId": "a1", "parts": [{ "text": "Part1 " }] },
+                    { "artifactId": "a2", "parts": [{ "text": "Part2" }] }
+                ]
+            }
+        }
+        """);
+        Assert.Equal("Part1 Part2", Helpers.ExtractText(el));
+    }
+
+    [Fact]
+    public void ExtractText_TaskWithEmptyArtifacts_ReturnsEmpty()
+    {
+        var el = Parse("""
+        {
+            "task": {
+                "id": "t-empty-art",
+                "status": { "state": "TASK_STATE_COMPLETED" },
+                "artifacts": []
+            }
+        }
+        """);
+        Assert.Equal("", Helpers.ExtractText(el));
+    }
+
+    [Fact]
+    public void ExtractText_TaskNoArtifactsField_ReturnsEmpty()
+    {
+        // No artifacts field at all — sample treats this as "no answer text".
+        var el = Parse("""
+        {
+            "task": {
+                "id": "t-no-art",
+                "status": {
+                    "state": "TASK_STATE_COMPLETED",
+                    "message": { "parts": [{ "text": "ignored chain-of-thought" }] }
                 }
             }
         }
         """);
-        Assert.Equal("Task completed", Helpers.ExtractText(el));
+        Assert.Equal("", Helpers.ExtractText(el));
     }
 
     [Fact]
-    public void ExtractText_MessageParts_ReturnsText()
+    public void ExtractText_TaskUnicodeText_PreservedCorrectly()
+    {
+        var el = Parse("""
+        {
+            "task": {
+                "id": "t-unicode",
+                "artifacts": [
+                    { "artifactId": "a1", "parts": [{ "text": "🚀 你好世界 مرحبا" }] }
+                ]
+            }
+        }
+        """);
+        Assert.Equal("🚀 你好世界 مرحبا", Helpers.ExtractText(el));
+    }
+
+    // ── ExtractText: result.message (sync, direct Message reply) ────────
+
+    [Fact]
+    public void ExtractText_V1MessagePayload_ReturnsText()
     {
         var el = Parse("""
         {
             "message": {
-                "parts": [{ "text": "From message" }]
+                "role": "ROLE_AGENT",
+                "messageId": "m1",
+                "contextId": "ctx-1",
+                "parts": [{ "text": "Direct message reply" }]
             }
         }
         """);
-        Assert.Equal("From message", Helpers.ExtractText(el));
+        Assert.Equal("Direct message reply", Helpers.ExtractText(el));
+    }
+
+    [Fact]
+    public void ExtractText_V1MessagePayload_MultipleTextParts_Concatenated()
+    {
+        var el = Parse("""
+        {
+            "message": {
+                "parts": [{ "text": "Hello " }, { "text": "world" }]
+            }
+        }
+        """);
+        Assert.Equal("Hello world", Helpers.ExtractText(el));
+    }
+
+    // ── ExtractText: result.artifactUpdate (streaming) ─────────────────
+
+    [Fact]
+    public void ExtractText_StreamingArtifactUpdate_ReturnsArtifactText()
+    {
+        var el = Parse("""
+        {
+            "artifactUpdate": {
+                "taskId": "t1",
+                "contextId": "ctx-1",
+                "artifact": {
+                    "artifactId": "a1",
+                    "parts": [{ "text": "streamed" }]
+                }
+            }
+        }
+        """);
+        Assert.Equal("streamed", Helpers.ExtractText(el));
+    }
+
+    // ── ExtractText: shapes that should NOT yield answer text ──────────
+
+    [Fact]
+    public void ExtractText_StreamingStatusUpdate_ReturnsEmpty()
+    {
+        // statusUpdate is for chain-of-thought / terminal state, not the
+        // final answer text. Even when it carries a message, ExtractText
+        // returns empty — the sample handles statusUpdate explicitly in
+        // Program.cs to render thoughts in gray.
+        var el = Parse("""
+        {
+            "statusUpdate": {
+                "taskId": "t1",
+                "contextId": "ctx-1",
+                "status": {
+                    "state": "TASK_STATE_WORKING",
+                    "message": { "parts": [{ "text": "thinking..." }] }
+                }
+            }
+        }
+        """);
+        Assert.Equal("", Helpers.ExtractText(el));
     }
 
     [Fact]
@@ -64,44 +192,19 @@ public class ExtractTextTests
     }
 
     [Fact]
-    public void ExtractText_MissingParts_ReturnsEmpty()
+    public void ExtractText_TaskWithDataOnlyArtifacts_ReturnsEmpty()
     {
-        var el = Parse("""{ "status": { "message": {} } }""");
+        var el = Parse("""
+        {
+            "task": {
+                "id": "t-data",
+                "artifacts": [
+                    { "artifactId": "a1", "parts": [{ "kind": "data", "data": { "k": "v" } }] }
+                ]
+            }
+        }
+        """);
         Assert.Equal("", Helpers.ExtractText(el));
-    }
-
-    [Fact]
-    public void ExtractText_MultipleParts_Concatenated()
-    {
-        var el = Parse("""{ "parts": [{ "text": "Hello " }, { "text": "world" }] }""");
-        Assert.Equal("Hello world", Helpers.ExtractText(el));
-    }
-
-    [Fact]
-    public void ExtractText_MixedPartTypes_OnlyTextExtracted()
-    {
-        var el = Parse("""
-        {
-            "parts": [
-                { "text": "visible" },
-                { "kind": "data", "data": "abc" },
-                { "text": " text" }
-            ]
-        }
-        """);
-        Assert.Equal("visible text", Helpers.ExtractText(el));
-    }
-
-    [Fact]
-    public void ExtractText_PrefersDirectParts_OverStatusMessage()
-    {
-        var el = Parse("""
-        {
-            "parts": [{ "text": "direct" }],
-            "status": { "message": { "parts": [{ "text": "nested" }] } }
-        }
-        """);
-        Assert.Equal("direct", Helpers.ExtractText(el));
     }
 
     // ── TryGetParts tests ───────────────────────────────────────────────
@@ -151,233 +254,40 @@ public class ExtractTextTests
         Assert.Equal("ok", text);
     }
 
-    // ── Edge-case tests ─────────────────────────────────────────────────
+    [Fact]
+    public void TryGetParts_MultipleTextParts_Concatenated()
+    {
+        var el = Parse("""{ "parts": [{ "text": "Hello " }, { "text": "world" }] }""");
+        var result = Helpers.TryGetParts(el, out var text);
+        Assert.True(result);
+        Assert.Equal("Hello world", text);
+    }
 
     [Fact]
-    public void ExtractText_NullTextInParts_HandledGracefully()
+    public void TryGetParts_MixedPartTypes_OnlyTextExtracted()
+    {
+        var el = Parse("""
+        {
+            "parts": [
+                { "text": "visible" },
+                { "kind": "data", "data": "abc" },
+                { "text": " text" }
+            ]
+        }
+        """);
+        var result = Helpers.TryGetParts(el, out var text);
+        Assert.True(result);
+        Assert.Equal("visible text", text);
+    }
+
+    [Fact]
+    public void TryGetParts_NullTextInParts_ReturnsFalse()
     {
         // "text": null — GetString() returns null, StringBuilder.Append(null) is a no-op.
+        // Resulting text length is 0 → TryGetParts returns false.
         var el = Parse("""{ "parts": [{ "text": null }] }""");
-        // TryGetParts returns false because appended text length is 0.
-        var result = Helpers.ExtractText(el);
-        Assert.Equal("", result);
-    }
-
-    [Fact]
-    public void ExtractText_DeeplyNestedStatusMessage_Works()
-    {
-        // Realistic server response with full status.message.parts path
-        var json = """
-        {
-            "id": "task-123",
-            "status": {
-                "state": "completed",
-                "message": {
-                    "role": "agent",
-                    "parts": [
-                        { "text": "Here is the answer: " },
-                        { "text": "42" }
-                    ]
-                }
-            },
-            "contextId": "ctx-abc"
-        }
-        """;
-        var el = Parse(json);
-        Assert.Equal("Here is the answer: 42", Helpers.ExtractText(el));
-    }
-
-    [Fact]
-    public void ExtractText_UnicodeText_PreservedCorrectly()
-    {
-        // Emoji, CJK characters, and RTL text
-        var el = Parse("""{ "parts": [{ "text": "🚀 你好世界 مرحبا" }] }""");
-        Assert.Equal("🚀 你好世界 مرحبا", Helpers.ExtractText(el));
-    }
-
-    // ── A2A v1.0 dual-shape tests ──────────────────────────────────────────
-    //
-    // Sydney is mid-rollout for the "answer-as-artifact" change (commit fedb1c9 /
-    // PR 5114178). During the rollout window, response text may arrive in either
-    // shape. ExtractText must prefer the new artifact path while falling back to
-    // the legacy status.message path when artifacts are absent.
-
-    [Fact]
-    public void ExtractText_TaskWithBothShapes_PrefersStatusMessage()
-    {
-        // Shape-based rule: when result.task.status.message has text, that's a
-        // pre-fedb1c9 ring still emitting in the legacy location — use it
-        // regardless of what's in artifacts.
-        var el = Parse("""
-        {
-            "task": {
-                "id": "t1",
-                "contextId": "ctx-1",
-                "status": {
-                    "state": "TASK_STATE_COMPLETED",
-                    "message": { "parts": [{ "text": "LEGACY answer" }] }
-                },
-                "artifacts": [
-                    {
-                        "artifactId": "a1",
-                        "name": "Answer",
-                        "parts": [{ "text": "artifact text" }]
-                    }
-                ]
-            }
-        }
-        """);
-        Assert.Equal("LEGACY answer", Helpers.ExtractText(el));
-    }
-
-    [Fact]
-    public void ExtractText_TaskWithArtifactFragment_PicksStatusMessage()
-    {
-        // Real rollout case: the artifact carries a tail fragment ("\")" from
-        // a citation marker) while the full answer lives in status.message.
-        // Length-pick correctly returns the status.message text.
-        var el = Parse("""
-        {
-            "task": {
-                "id": "t-frag",
-                "status": {
-                    "state": "TASK_STATE_COMPLETED",
-                    "message": {
-                        "parts": [{ "text": "The actual long answer body the agent produced for the user." }]
-                    }
-                },
-                "artifacts": [
-                    {
-                        "artifactId": "a-frag",
-                        "parts": [{ "text": "\")" }]
-                    }
-                ]
-            }
-        }
-        """);
-        Assert.Equal("The actual long answer body the agent produced for the user.", Helpers.ExtractText(el));
-    }
-
-    [Fact]
-    public void ExtractText_TaskOnlyStatusMessage_FallsBackToLegacy()
-    {
-        // Pre-fedb1c9 server: text in result.task.status.message.parts only.
-        var el = Parse("""
-        {
-            "task": {
-                "id": "t-legacy",
-                "status": {
-                    "state": "TASK_STATE_COMPLETED",
-                    "message": { "parts": [{ "text": "Legacy answer" }] }
-                }
-            }
-        }
-        """);
-        Assert.Equal("Legacy answer", Helpers.ExtractText(el));
-    }
-
-    [Fact]
-    public void ExtractText_TaskArtifactsAcrossMultipleArtifacts_AllConcatenated()
-    {
-        var el = Parse("""
-        {
-            "task": {
-                "id": "t-multi",
-                "artifacts": [
-                    { "artifactId": "a1", "parts": [{ "text": "Part1 " }] },
-                    { "artifactId": "a2", "parts": [{ "text": "Part2" }] }
-                ]
-            }
-        }
-        """);
-        Assert.Equal("Part1 Part2", Helpers.ExtractText(el));
-    }
-
-    [Fact]
-    public void ExtractText_StreamingArtifactUpdate_ReturnsArtifactText()
-    {
-        // Streaming event: result.artifactUpdate.artifact.parts (preferred).
-        var el = Parse("""
-        {
-            "artifactUpdate": {
-                "taskId": "t1",
-                "contextId": "ctx-1",
-                "artifact": {
-                    "artifactId": "a1",
-                    "parts": [{ "text": "streamed" }]
-                }
-            }
-        }
-        """);
-        Assert.Equal("streamed", Helpers.ExtractText(el));
-    }
-
-    [Fact]
-    public void ExtractText_StreamingStatusUpdate_LegacyMessageText()
-    {
-        // Streaming event from a pre-fedb1c9 ring: text in statusUpdate.status.message.
-        var el = Parse("""
-        {
-            "statusUpdate": {
-                "taskId": "t1",
-                "contextId": "ctx-1",
-                "status": {
-                    "state": "TASK_STATE_WORKING",
-                    "message": { "parts": [{ "text": "thinking..." }] }
-                }
-            }
-        }
-        """);
-        Assert.Equal("thinking...", Helpers.ExtractText(el));
-    }
-
-    [Fact]
-    public void ExtractText_StreamingStatusUpdateNoMessage_ReturnsEmpty()
-    {
-        // Terminal state with no message attached — common shape.
-        var el = Parse("""
-        {
-            "statusUpdate": {
-                "taskId": "t1",
-                "contextId": "ctx-1",
-                "status": { "state": "TASK_STATE_COMPLETED" }
-            }
-        }
-        """);
-        Assert.Equal("", Helpers.ExtractText(el));
-    }
-
-    [Fact]
-    public void ExtractText_TaskWithEmptyArtifacts_FallsBackToStatusMessage()
-    {
-        var el = Parse("""
-        {
-            "task": {
-                "id": "t-empty-art",
-                "status": {
-                    "message": { "parts": [{ "text": "from status" }] }
-                },
-                "artifacts": []
-            }
-        }
-        """);
-        Assert.Equal("from status", Helpers.ExtractText(el));
-    }
-
-    [Fact]
-    public void ExtractText_V1MessagePayload_ReturnsText()
-    {
-        // result.message — direct Message reply (no task at all).
-        var el = Parse("""
-        {
-            "message": {
-                "role": "ROLE_AGENT",
-                "messageId": "m1",
-                "contextId": "ctx-1",
-                "parts": [{ "text": "Direct message reply" }]
-            }
-        }
-        """);
-        Assert.Equal("Direct message reply", Helpers.ExtractText(el));
+        var result = Helpers.TryGetParts(el, out var text);
+        Assert.False(result);
+        Assert.Equal("", text);
     }
 }
