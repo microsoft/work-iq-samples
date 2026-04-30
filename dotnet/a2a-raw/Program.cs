@@ -2,14 +2,12 @@
 // Licensed under the MIT License.
 //
 // WorkIQ A2A Raw Sample — Minimal A2A client using only HttpClient + JSON
-// No A2A SDK. Shows exactly what goes over the wire (JSON-RPC v0.3 format).
+// No A2A SDK. Shows exactly what goes over the wire (JSON-RPC v1.0 format).
 //
-// Defaults target the Work IQ Gateway (`https://workiq.svc.cloud.microsoft/a2a/`).
-// Override --endpoint + --scope to target any other A2A endpoint.
+// Targets the Work IQ Gateway (`https://workiq.svc.cloud.microsoft/a2a/`).
 //
 // Usage:
-//   dotnet run -- --token <JWT|WAM> --appid <client-id> [--account user@tenant.com] [--stream]
-//   dotnet run -- --endpoint <agent-url> --token <JWT> [--stream]
+//   dotnet run -- --token <JWT|WAM> --appid <client-id> [--account user@tenant.com]
 
 using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
@@ -24,7 +22,9 @@ using WorkIQ.A2ARaw;
 var parsed = Helpers.ParseArgs(args);
 if (parsed.Error != null)
 {
-    Console.Error.WriteLine(parsed.Error);
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.Error.WriteLine($"ERROR: {parsed.Error}");
+    Console.ResetColor();
     PrintUsage();
     return;
 }
@@ -34,7 +34,7 @@ if (parsed.Error != null)
 string endpoint = parsed.Endpoint ?? "https://workiq.svc.cloud.microsoft/a2a/";
 string scope = parsed.Scope ?? "api://workiq.svc.cloud.microsoft/.default";
 string? token = parsed.Token, appId = parsed.AppId, account = parsed.Account, tenant = parsed.Tenant, agentId = parsed.AgentId;
-bool stream = parsed.Stream, allHeaders = parsed.AllHeaders, listAgents = parsed.ListAgents;
+bool allHeaders = parsed.AllHeaders, showWire = parsed.ShowWire;
 
 if (string.IsNullOrEmpty(token))
 {
@@ -66,71 +66,17 @@ if (token.Equals("WAM", StringComparison.OrdinalIgnoreCase))
 var http = new HttpClient();
 http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-// ── --list-agents: GET {endpoint}/.agents and exit ───────────────────────
-//
-// {endpoint}/.agents is a Work IQ / Sydney extension (not part of the A2A
-// spec) returning an array of {agentId, name, provider} entries. Useful for
-// discovering IDs to pass to --agent-id.
-if (listAgents)
-{
-    var listUri = $"{endpoint.TrimEnd('/')}/.agents";
-    HttpResponseMessage listRes;
-    try { listRes = await http.GetAsync(listUri); }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"ERROR: failed to GET {listUri}: {ex.Message}");
-        return;
-    }
-
-    if (!listRes.IsSuccessStatusCode)
-    {
-        var body = await listRes.Content.ReadAsStringAsync();
-        Console.Error.WriteLine($"ERROR: {(int)listRes.StatusCode} {listRes.ReasonPhrase} from {listUri}");
-        if (!string.IsNullOrWhiteSpace(body)) Console.Error.WriteLine($"  {body.Trim()}");
-        return;
-    }
-
-    var listJson = await listRes.Content.ReadAsStringAsync();
-    using var listDoc = JsonDocument.Parse(listJson);
-    if (listDoc.RootElement.ValueKind != JsonValueKind.Array)
-    {
-        Console.Error.WriteLine($"ERROR: expected JSON array from {listUri}, got {listDoc.RootElement.ValueKind}");
-        return;
-    }
-
-    var rows = listDoc.RootElement.EnumerateArray()
-        .Select(e => (
-            Id: e.TryGetProperty("agentId", out var id) ? id.GetString() ?? "" : "",
-            Name: e.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "",
-            Provider: e.TryGetProperty("provider", out var p) ? p.GetString() ?? "" : ""))
-        .ToList();
-
-    Console.WriteLine();
-    Console.WriteLine($"Agents at {endpoint}:");
-    Console.WriteLine();
-    if (rows.Count == 0)
-    {
-        Console.WriteLine("  (none)");
-        return;
-    }
-
-    int wId = Math.Max(8, rows.Max(r => r.Id.Length));
-    int wName = Math.Max(4, rows.Max(r => r.Name.Length));
-    Console.WriteLine($"  {"AGENT ID".PadRight(wId)}  {"NAME".PadRight(wName)}  PROVIDER");
-    foreach (var r in rows)
-        Console.WriteLine($"  {r.Id.PadRight(wId)}  {r.Name.PadRight(wName)}  {r.Provider}");
-    Console.WriteLine();
-    Console.WriteLine($"{rows.Count} agent{(rows.Count == 1 ? "" : "s")}.");
-    return;
-}
+// Opt in to A2A v1.0 wire format. Without this header, the server defaults
+// to the v0.3 dispatcher and the v1.0 method name "SendMessage" returns
+// JSON-RPC -32601 "Method not found".
+http.DefaultRequestHeaders.TryAddWithoutValidation("A2A-Version", "1.0");
 
 // ── Agent card resolution (when --agent-id is set) ───────────────────────
 //
 // This sample deliberately does the agent-card fetch in raw HTTP + JSON to
 // show what the wire interaction looks like. With --agent-id the sample:
 //   1. GET {endpoint}/{agentId}/.well-known/agent-card.json
-//   2. Parse the JSON to find:   url, name, capabilities.streaming
+//   2. Parse the JSON to find:   url, name
 //   3. Replace the POST target with agentCard.url
 //
 // Without --agent-id the sample posts directly to the gateway endpoint
@@ -154,20 +100,11 @@ if (!string.IsNullOrEmpty(agentId))
         var resolvedUrl = root.GetProperty("url").GetString()
             ?? throw new InvalidOperationException("agent-card.json has no 'url' field");
         var resolvedName = root.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-        var streamingSupported = root.TryGetProperty("capabilities", out var caps)
-            && caps.TryGetProperty("streaming", out var s) && s.GetBoolean();
 
         Console.WriteLine($"Agent card:");
         Console.WriteLine($"  id              {agentId}");
         Console.WriteLine($"  name            {resolvedName}");
         Console.WriteLine($"  url             {resolvedUrl}");
-        Console.WriteLine($"  streaming       {streamingSupported}");
-
-        if (stream && !streamingSupported)
-        {
-            Console.WriteLine("  note: agent does not advertise streaming; falling back to sync");
-            stream = false;
-        }
 
         endpoint = resolvedUrl;
     }
@@ -181,7 +118,6 @@ if (!string.IsNullOrEmpty(agentId))
 string? contextId = null;
 
 Console.WriteLine($"Connected to: {endpoint}");
-Console.WriteLine($"Mode: {(stream ? "streaming (message/stream)" : "sync (message/send)")}");
 Console.WriteLine("Type a message. 'quit' to exit.\n");
 
 // ── Chat loop ────────────────────────────────────────────────────────────
@@ -239,40 +175,35 @@ while (true)
 
     try
     {
-        // Build the A2A message (v0.3 format — requires "kind" discriminators)
+        // Build the A2A message (v1.0 format — no "kind" discriminators, ROLE_USER enum,
+        // flat parts shape; SCREAMING_SNAKE_CASE on enum values).
         var message = new Dictionary<string, object?>
         {
-            ["kind"] = "message",
-            ["role"] = "user",
+            ["role"] = "ROLE_USER",
             ["messageId"] = Guid.NewGuid().ToString(),
             ["contextId"] = contextId,
-            ["parts"] = new object[] { new { kind = "text", text = input } },
+            ["parts"] = new object[] { new { text = input } },
             ["metadata"] = new Dictionary<string, object>
             {
                 ["Location"] = new { timeZoneOffset = (int)TimeZoneInfo.Local.BaseUtcOffset.TotalMinutes, timeZone = TimeZoneInfo.Local.Id },
             },
         };
 
-        // Wrap in JSON-RPC envelope — v0.3 sends method inside the body, POSTs to base URL
+        // Wrap in JSON-RPC envelope — v1.0 method name: SendMessage.
         var jsonRpcRequest = new
         {
             jsonrpc = "2.0",
             id = Guid.NewGuid().ToString(),
-            method = stream ? "message/stream" : "message/send",
+            method = "SendMessage",
             @params = new { message },
         };
 
         var json = JsonSerializer.Serialize(jsonRpcRequest);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-        if (stream)
-        {
-            await StreamResponse(http, endpoint, content, spinnerCts, spinnerTask);
-        }
-        else
-        {
-            await SyncResponse(http, endpoint, content, spinnerCts, spinnerTask);
-        }
+        if (showWire) PrintWireBody("▶ POST request", json);
+
+        await SyncResponse(http, endpoint, content, spinnerCts, spinnerTask, showWire);
     }
     catch (Exception ex)
     {
@@ -288,9 +219,9 @@ while (true)
 
 // ── Sync: POST to base URL with method "message/send" ────────────────────
 
-async Task SyncResponse(HttpClient client, string ep, HttpContent body, CancellationTokenSource spinCts, Task spinTask)
+async Task SyncResponse(HttpClient client, string ep, HttpContent body, CancellationTokenSource spinCts, Task spinTask, bool showWire)
 {
-    // v0.3: POST to the base URL (not /message:send) — method is inside the JSON-RPC body
+    // POST to the base URL — the method (SendMessage) is inside the JSON-RPC body.
     var res = await client.PostAsync(ep, body);
 
     // Stop spinner now that we have a response
@@ -300,6 +231,8 @@ async Task SyncResponse(HttpClient client, string ep, HttpContent body, Cancella
     PrintResponseHeaders(res);
 
     var responseBody = await res.Content.ReadAsStringAsync();
+
+    if (showWire) PrintWireBody($"◀ {(int)res.StatusCode} {res.StatusCode} response", responseBody);
 
     if (!res.IsSuccessStatusCode)
     {
@@ -330,13 +263,8 @@ async Task SyncResponse(HttpClient client, string ep, HttpContent body, Cancella
 
     if (doc.RootElement.TryGetProperty("result", out var result))
     {
-        // Extract contextId for multi-turn
-        if (result.TryGetProperty("contextId", out var ctx))
-            contextId = ctx.GetString();
-        else if (result.TryGetProperty("status", out var status) &&
-                 status.TryGetProperty("message", out var msg) &&
-                 msg.TryGetProperty("contextId", out var sCtx))
-            contextId = sCtx.GetString();
+        // v1.0: contextId lives on result.task.contextId or result.message.contextId.
+        contextId = ExtractContextId(result) ?? contextId;
 
         var text = Helpers.ExtractText(result);
         Console.WriteLine(text);
@@ -347,82 +275,18 @@ async Task SyncResponse(HttpClient client, string ep, HttpContent body, Cancella
     }
 }
 
-// ── Streaming: POST to base URL with method "message/stream" (SSE) ───────
-
-async Task StreamResponse(HttpClient client, string ep, HttpContent body, CancellationTokenSource spinCts, Task spinTask)
+// Walks a v1.0 sync `result` envelope for the contextId. v1.0 places contextId
+// on result.task or result.message.
+static string? ExtractContextId(JsonElement el)
 {
-    // v0.3: POST to the base URL — method is inside the JSON-RPC body
-    var request = new HttpRequestMessage(HttpMethod.Post, ep) { Content = body };
-    request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+    static string? Get(JsonElement e) => e.TryGetProperty("contextId", out var c) ? c.GetString() : null;
 
-    var res = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-
-    // Stop spinner now that we have a response
-    spinCts.Cancel();
-    try { await spinTask; } catch { }
-
-    PrintResponseHeaders(res);
-
-    if (!res.IsSuccessStatusCode)
+    foreach (var key in new[] { "task", "message" })
     {
-        var errBody = await res.Content.ReadAsStringAsync();
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"  {errBody}");
-        Console.ResetColor();
-        return;
+        if (el.TryGetProperty(key, out var inner) && Get(inner) is { } id)
+            return id;
     }
-
-    var responseStream = await res.Content.ReadAsStreamAsync();
-    using var reader = new StreamReader(responseStream);
-
-    var previousText = "";
-
-    while (!reader.EndOfStream)
-    {
-        var line = await reader.ReadLineAsync();
-        if (line == null) break;
-
-        // SSE format: lines starting with "data:" contain JSON-RPC responses
-        if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
-        var data = line["data:".Length..].Trim();
-        if (string.IsNullOrEmpty(data)) continue;
-
-        try
-        {
-            using var doc = JsonDocument.Parse(data);
-
-            // Unwrap JSON-RPC: get the "result" field
-            JsonElement payload;
-            if (doc.RootElement.TryGetProperty("result", out var result))
-                payload = result;
-            else
-                payload = doc.RootElement;
-
-            // Extract contextId
-            if (payload.TryGetProperty("contextId", out var ctx))
-                contextId = ctx.GetString();
-            else if (payload.TryGetProperty("status", out var st) &&
-                     st.TryGetProperty("message", out var m) &&
-                     m.TryGetProperty("contextId", out var sCtx))
-                contextId = sCtx.GetString();
-
-            // Extract and print text delta
-            var fullText = Helpers.ExtractText(payload);
-            if (fullText.StartsWith(previousText, StringComparison.Ordinal))
-            {
-                Console.Write(fullText[previousText.Length..]);
-                previousText = fullText;
-            }
-            else if (fullText != previousText)
-            {
-                Console.Write(fullText);
-                previousText = fullText;
-            }
-        }
-        catch { /* skip unparseable SSE events */ }
-    }
-
-    Console.WriteLine();
+    return Get(el);
 }
 
 // ── WAM auth ─────────────────────────────────────────────────────────────
@@ -473,6 +337,24 @@ async Task<(string token, IPublicClientApplication app, IAccount? account)> Acqu
     return (result.AccessToken, app, result.Account);
 }
 
+// ── Wire body logging (--show-wire) ──────────────────────────────────────
+
+static void PrintWireBody(string label, string raw)
+{
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.WriteLine($"\n  {label}:");
+    string body;
+    try
+    {
+        using var doc = JsonDocument.Parse(raw);
+        body = JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+    }
+    catch { body = raw; }
+
+    foreach (var line in body.Split('\n')) Console.WriteLine($"      {line}");
+    Console.ResetColor();
+}
+
 // ── Response headers ─────────────────────────────────────────────────────
 
 void PrintResponseHeaders(HttpResponseMessage res)
@@ -514,7 +396,7 @@ static IntPtr ConsoleWindowHandle() { var c = GetConsoleWindow(); var r = GetAnc
 void PrintUsage()
 {
     Console.WriteLine("""
-    Work IQ A2A Raw Sample — minimal A2A client, no SDK (JSON-RPC v0.3 wire format)
+    Work IQ A2A Raw Sample — minimal A2A client, no SDK (JSON-RPC v1.0 wire format)
 
     Usage:
       dotnet run -- --token <JWT|WAM> [options]
@@ -523,35 +405,30 @@ void PrintUsage()
       --token, -t      Bearer JWT token, or 'WAM' for Windows broker auth
 
     Options:
-      --endpoint, -e   Agent URL. Defaults to the Work IQ Gateway A2A endpoint:
-                       https://workiq.svc.cloud.microsoft/a2a/
-                       Override to target a different A2A endpoint.
       --agent-id, -A   Invoke a specific agent. The sample fetches
-                       {endpoint}/{agent-id}/.well-known/agent-card.json,
+                       <gateway>/<agent-id>/.well-known/agent-card.json,
                        reads agentCard.url, and POSTs JSON-RPC there.
-                       Without --agent-id, the sample posts directly to
-                       --endpoint (default agent for that gateway).
+                       Without --agent-id, the sample posts to the
+                       Work IQ Gateway A2A endpoint (default agent).
       --scope, -s      Token scope for WAM. Defaults to the Work IQ audience:
                        api://workiq.svc.cloud.microsoft/.default
       --appid, -a      App client ID (required with WAM)
       --account        Account hint (e.g., user@contoso.com)
       --tenant, -T     Tenant ID or domain (required with WAM for single-tenant apps;
                        defaults to 'common' for multi-tenant apps)
-      --stream         Use streaming mode (SSE via message/stream)
       --all-headers    Print all response headers (default: key diagnostics only)
-      --list-agents    GET {endpoint}/.agents and print, then exit (no chat loop)
+      --show-wire      Pretty-print raw JSON-RPC request/response bodies.
 
     Examples:
       # Work IQ Gateway (uses defaults)
       dotnet run -- -t WAM -a <appid>
 
-      # List agents (discover IDs to use with --agent-id)
-      dotnet run -- -t WAM -a <appid> --list-agents
-
       # Invoke a specific agent
       dotnet run -- -t WAM -a <appid> --agent-id <AGENT_ID>
 
       # With a pre-obtained JWT
-      dotnet run -- -t eyJ0eXAi... --stream
+      dotnet run -- -t eyJ0eXAi...
+
+    Note: streaming responses are coming soon and not yet supported by this sample.
     """);
 }

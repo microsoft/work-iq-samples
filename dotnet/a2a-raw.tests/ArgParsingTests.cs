@@ -15,12 +15,11 @@ public class ArgParsingTests
     [Fact]
     public void ValidArgs_AllParsedCorrectly()
     {
-        var r = Helpers.ParseArgs(["--endpoint", "https://example.com", "--token", "abc", "--appid", "id1", "--stream"]);
+        var r = Helpers.ParseArgs(["--endpoint", "https://example.com", "--token", "abc", "--appid", "id1"]);
         Assert.Null(r.Error);
         Assert.Equal("https://example.com", r.Endpoint);
         Assert.Equal("abc", r.Token);
         Assert.Equal("id1", r.AppId);
-        Assert.True(r.Stream);
     }
 
     [Fact]
@@ -39,6 +38,15 @@ public class ArgParsingTests
         var r = Helpers.ParseArgs(["--unknown"]);
         Assert.NotNull(r.Error);
         Assert.Contains("Unknown flag", r.Error);
+    }
+
+    [Fact]
+    public void StreamFlag_ReturnsComingSoonError()
+    {
+        var r = Helpers.ParseArgs(["--endpoint", "u", "--token", "t", "--stream"]);
+        Assert.NotNull(r.Error);
+        Assert.Contains("--stream is not supported", r.Error);
+        Assert.Contains("coming soon", r.Error);
     }
 
     [Fact]
@@ -123,29 +131,19 @@ public class ArgParsingTests
     }
 
     [Fact]
-    public void ListAgents_LongFlag_Sets()
+    public void ShowWire_LongFlag_Sets()
     {
-        var r = Helpers.ParseArgs(["-e", "https://example.com", "-t", "tok", "--list-agents"]);
+        var r = Helpers.ParseArgs(["-e", "https://example.com", "-t", "tok", "--show-wire"]);
         Assert.Null(r.Error);
-        Assert.True(r.ListAgents);
+        Assert.True(r.ShowWire);
     }
 
     [Fact]
-    public void ListAgents_NotProvided_IsFalse()
+    public void ShowWire_NotProvided_IsFalse()
     {
         var r = Helpers.ParseArgs(["-e", "https://example.com", "-t", "tok"]);
         Assert.Null(r.Error);
-        Assert.False(r.ListAgents);
+        Assert.False(r.ShowWire);
     }
 
-    [Fact]
-    public void ListAgents_CombinesWithOtherFlags()
-    {
-        var r = Helpers.ParseArgs(["--endpoint", "https://example.com", "--token", "t", "--appid", "a", "--list-agents"]);
-        Assert.Null(r.Error);
-        Assert.True(r.ListAgents);
-        Assert.Equal("https://example.com", r.Endpoint);
-        Assert.Equal("t", r.Token);
-        Assert.Equal("a", r.AppId);
-    }
 }

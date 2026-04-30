@@ -15,11 +15,10 @@ public class ArgParsingTests
     [Fact]
     public void ValidArgs_ProduceCorrectConfig()
     {
-        var r = Helpers.ParseArgs(["--token", "mytoken", "--appid", "app1", "--stream"]);
+        var r = Helpers.ParseArgs(["--token", "mytoken", "--appid", "app1"]);
         Assert.Null(r.Error);
         Assert.Equal("mytoken", r.Token);
         Assert.Equal("app1", r.AppId);
-        Assert.True(r.Stream);
     }
 
     [Fact]
@@ -28,6 +27,24 @@ public class ArgParsingTests
         var r = Helpers.ParseArgs([]);
         Assert.Null(r.Error);
         Assert.Null(r.Token);
+    }
+
+    [Fact]
+    public void StreamFlag_ReturnsComingSoonError()
+    {
+        var r = Helpers.ParseArgs(["--token", "t", "--stream"]);
+        Assert.NotNull(r.Error);
+        Assert.Contains("--stream is not supported", r.Error);
+        Assert.Contains("coming soon", r.Error);
+    }
+
+    [Fact]
+    public void UnknownFlag_ReturnsError()
+    {
+        var r = Helpers.ParseArgs(["--token", "t", "--stre"]);
+        Assert.NotNull(r.Error);
+        Assert.Contains("Unknown flag", r.Error);
+        Assert.Contains("--stre", r.Error);
     }
 
     [Fact]
@@ -119,29 +136,27 @@ public class ArgParsingTests
     }
 
     [Fact]
-    public void ListAgents_LongFlag_Sets()
+    public void ShowWire_LongFlag_Sets()
     {
-        var r = Helpers.ParseArgs(["--token", "t", "--list-agents"]);
+        var r = Helpers.ParseArgs(["--token", "t", "--show-wire"]);
         Assert.Null(r.Error);
-        Assert.True(r.ListAgents);
+        Assert.True(r.ShowWire);
     }
 
     [Fact]
-    public void ListAgents_NotProvided_IsFalse()
+    public void ShowWire_NotProvided_IsFalse()
     {
         var r = Helpers.ParseArgs(["--token", "t"]);
         Assert.Null(r.Error);
-        Assert.False(r.ListAgents);
+        Assert.False(r.ShowWire);
     }
 
     [Fact]
-    public void ListAgents_CombinesWithOtherFlags()
+    public void ShowWire_IndependentOfVerbosity()
     {
-        var r = Helpers.ParseArgs(["--token", "t", "--appid", "x", "--list-agents", "--tenant", "common"]);
+        var r = Helpers.ParseArgs(["--token", "t", "--show-wire", "-v", "0"]);
         Assert.Null(r.Error);
-        Assert.True(r.ListAgents);
-        Assert.Equal("t", r.Token);
-        Assert.Equal("x", r.AppId);
-        Assert.Equal("common", r.Tenant);
+        Assert.True(r.ShowWire);
+        Assert.Equal(0, r.Verbosity);
     }
 }

@@ -2,11 +2,11 @@
 
 A bare-minimum A2A client using only `HttpClient` and `System.Text.Json` — **no A2A SDK**. Shows exactly what goes over the wire when talking to a Work IQ agent.
 
-This sample **calls the agent endpoint directly** — no agent card retrieval, no discovery, no capability negotiation. It assumes you already know the agent URL and sends JSON-RPC v0.3 messages to it.
+This sample **calls the agent endpoint directly** — no agent card retrieval, no discovery, no capability negotiation. It assumes you already know the agent URL and sends JSON-RPC v1.0 messages to it.
 
-Defaults target the **Work IQ Gateway** (`https://workiq.svc.cloud.microsoft/a2a/`). Use `--endpoint` + `--scope` to target a different A2A endpoint.
+Targets the **Work IQ Gateway** (`https://workiq.svc.cloud.microsoft/a2a/`).
 
-> **Protocol version**: This sample uses the **A2A v0.3 JSON-RPC wire format**, which is what the Work IQ server currently supports. The A2A spec has since moved to v1.0 with a REST-style API (different URL paths, no JSON-RPC envelope). This sample will be updated to v1.0 when the server is upgraded.
+> **Protocol version**: This sample uses the **A2A v1.0 JSON-RPC wire format** (PROTOJSON conventions: SCREAMING_SNAKE_CASE enums, no `kind` discriminators, named result wrappers). Work IQ also accepts v0.3 wire format via the `A2A-Version: 0.3` request header for callers that haven't migrated yet. The v1.0 spec also defines a REST binding (`POST /v1/message:send`); Work IQ may expose this in a future preview update.
 
 Use this sample when you want to understand the A2A protocol at the HTTP level, or when you don't want to take a dependency on the [A2A .NET SDK](https://github.com/a2aproject/a2a-dotnet). For the SDK-based sample with agent-card handling, see [`../a2a/`](../a2a/).
 
@@ -17,7 +17,7 @@ Use this sample when you want to understand the A2A protocol at the HTTP level, 
 | **Dependencies** | A2A NuGet SDK + MSAL | MSAL only |
 | **Protocol handling** | SDK manages JSON-RPC, SSE parsing, types | Raw `HttpClient` + `JsonDocument` |
 | **Lines of code** | ~480 | ~280 |
-| **Best for** | Production apps, full A2A features | Learning, debugging, minimal integration |
+| **Recommended for** | Any .NET integration with Work IQ | Reading the protocol on the wire; reference for porting to languages without an A2A SDK |
 
 ## Prerequisites
 
@@ -31,11 +31,11 @@ Use this sample when you want to understand the A2A protocol at the HTTP level, 
      ..\..\scripts\admin-setup.ps1
      ```
    - Otherwise, hand [`../../ADMIN_SETUP.md`](../../ADMIN_SETUP.md) to your admin. They'll give you an **App ID** and **Tenant ID**.
-3. **.NET 10 SDK** or later — [download](https://dotnet.microsoft.com/download/dotnet/10.0).
+3. **.NET 8 SDK** or later — [download](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ## Quick start
 
-### Against the Work IQ Gateway (default — prod host)
+### Against the Work IQ Gateway (default)
 
 ```bash
 dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
@@ -43,13 +43,11 @@ dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
 
 Type a message, see a response, type `quit` to exit.
 
-### Streaming mode
-
-Add `--stream` to switch from `message/send` to `message/stream`.
+> **Streaming responses are coming soon** and not yet supported by this sample.
 
 ### Invoking a specific agent (`--agent-id`)
 
-Without `--agent-id`, the sample POSTs directly to `--endpoint` (the gateway's default agent). To target a specific agent:
+Without `--agent-id`, the sample POSTs to the Work IQ Gateway A2A endpoint (the gateway's default agent). To target a specific agent:
 
 ```bash
 dotnet run -- --agent-id <AGENT_ID> --token WAM --appid <APP_ID> --tenant <TENANT_ID>
@@ -62,14 +60,11 @@ The sample then does **two raw HTTP calls** — illustrating exactly what a non-
    GET {endpoint}/{agent-id}/.well-known/agent-card.json
    Authorization: Bearer <token>
    ```
-   Response is the standard A2A agent card JSON. The sample parses three fields:
+   Response is the standard A2A agent card JSON. The sample parses two fields:
    - `url` — where to POST messages for this agent
    - `name` — friendly name (for logging)
-   - `capabilities.streaming` — whether `message/stream` is supported
 
-2. **Message post** — same JSON-RPC shape as before, but POSTed to `agentCard.url` (read from step 1) instead of `--endpoint`.
-
-If `--stream` is set but the agent's card has `capabilities.streaming = false`, the sample falls back to `message/send` automatically and prints a note.
+2. **Message post** — same JSON-RPC shape as before, but POSTed to `agentCard.url` (read from step 1) instead of the gateway A2A endpoint.
 
 #### Agent card wire format (what the GET returns)
 
@@ -77,7 +72,7 @@ If `--stream` is set but the agent's card has `capabilities.streaming = false`, 
 {
   "name": "Researcher Agent",
   "description": "...",
-  "url": "https://substrate.office.com/m365Copilot/agents/<agent-id>/",
+  "url": "<agent-endpoint-url>",
   "version": "1.0",
   "capabilities": {
     "streaming": true,
@@ -91,31 +86,19 @@ If `--stream` is set but the agent's card has `capabilities.streaming = false`, 
 
 This is the [A2A AgentCard schema](https://a2a-protocol.org/latest/specification/#agent-card). Useful as a porting reference if you're implementing this in another language.
 
-#### How to find an agent ID — `--list-agents`
+<a id="how-to-find-an-agent-id"></a>
+#### How to find an agent ID
 
-Agent IDs are stable identifiers exposed by the gateway's agent registry (`{endpoint}/.agents`, a Work IQ / Sydney extension — not part of the A2A spec). Pass `--list-agents` to fetch and print the registry, then exit:
-
-```bash
-dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID> --list-agents
-```
-
-The sample does a single `GET {endpoint}/.agents` with the bearer token and prints the `{agentId, name, provider}` rows. Sample output:
-
-```
-Agents at https://workiq.svc.cloud.microsoft/a2a/:
-
-  AGENT ID                  NAME              PROVIDER
-  bizchat-as-gpt-scenario   BizChat           Microsoft
-  researcher-v1             Researcher        Microsoft
-
-5 agents.
-```
-
-Equivalent raw curl:
+Use the [WorkIQ CLI](https://www.npmjs.com/package/@microsoft/workiq) to list the agents available to your signed-in user. The list command is currently behind an `experimental` flag:
 
 ```bash
-curl -H "Authorization: Bearer <token>" {endpoint}/.agents
+npm install -g @microsoft/workiq        # or: dotnet tool install --global WorkIQ
+workiq accept-eula
+workiq config set experimental=true
+workiq list-agents
 ```
+
+You can also copy the agent ID from the address bar in the [Microsoft 365 Copilot Chat website](https://m365.cloud.microsoft/chat/) — the segment after `/chat/agent/`. Treat the ID as an opaque string.
 
 ### With a pre-obtained JWT (any platform)
 
@@ -129,17 +112,16 @@ dotnet run -- --token eyJ0eXAi...
 
 ```
 Connected to: https://workiq.svc.cloud.microsoft/a2a/
-Mode: sync (message/send)
+Mode: sync (SendMessage)
 Type a message. 'quit' to exit.
 
 You > What's on my schedule today?
 Agent > Today you have:
   - 9:00 AM — team standup
-  - 11:00 AM — review with Dana
+  - 11:00 AM — review with Alice
   - 2:00 PM — customer call
   [200 OK]
   request-id: a1b2c3d4-...
-  x-ms-ags-diagnostic: {"ServerInfo":{"DataCenter":"...","Slice":"R"}}
 
 You > quit
 ```
@@ -149,59 +131,71 @@ You > quit
 | Flag | Description |
 |------|-------------|
 | `--token, -t` | `WAM` for Windows broker auth, or a pre-obtained JWT string. **Required.** |
-| `--endpoint, -e` | Full agent URL. Default: `https://workiq.svc.cloud.microsoft/a2a/` |
 | `--scope, -s` | Token scope for WAM. Default: `api://workiq.svc.cloud.microsoft/.default` |
 | `--appid, -a` | Entra app client ID (required with `WAM`) |
 | `--tenant, -T` | Tenant ID or domain. Required with `WAM` for single-tenant apps; defaults to `common` for multi-tenant. |
 | `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
-| `--agent-id, -A` | Invoke a specific agent (fetches `.well-known/agent-card.json` and POSTs to `agentCard.url`) |
-| `--list-agents` | GET `{endpoint}/.agents` and print, then exit (no chat loop). Use to discover agent IDs. |
-| `--stream` | Use streaming mode (`message/stream` via SSE) |
+| `--agent-id, -A` | Invoke a specific agent (fetches `.well-known/agent-card.json` and POSTs to `agentCard.url`). See [How to find an agent ID](#how-to-find-an-agent-id) above. |
+| `--show-wire` | Pretty-print raw JSON-RPC request/response bodies. Useful for protocol debugging. |
 | `--all-headers` | Print every response header (default: only diagnostic ones) |
 
 ## What goes over the wire
 
-The server uses **A2A v0.3** which is JSON-RPC based. All requests POST to the base URL with the method inside the JSON-RPC body.
+The server accepts **A2A v1.0** JSON-RPC. All requests POST to the base URL with the method inside the JSON-RPC body.
 
-### Sync: `POST` with method `message/send`
+### Sync: `POST` with method `SendMessage`
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": "unique-request-id",
-  "method": "message/send",
+  "id": "<request-guid>",
+  "method": "SendMessage",
   "params": {
     "message": {
-      "kind": "message",
-      "role": "user",
-      "messageId": "guid",
-      "parts": [{ "kind": "text", "text": "What meetings do I have today?" }],
-      "contextId": null,
+      "role": "ROLE_USER",
+      "messageId": "<message-guid>",
+      "parts": [{ "text": "What meetings do I have today?" }],
       "metadata": { "Location": { "timeZoneOffset": -480, "timeZone": "America/Los_Angeles" } }
     }
   }
 }
 ```
 
-Response is a JSON-RPC response with `result` containing the agent's message and `contextId` for multi-turn.
+Response is a JSON-RPC envelope with `result.task` containing the agent's task and a `contextId` for multi-turn:
 
-### Streaming: `POST` with method `message/stream`
-
-Same JSON-RPC request with `"method": "message/stream"`. Response is `text/event-stream` (SSE) where each event is a JSON-RPC response:
-
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "<request-guid>",
+  "result": {
+    "task": {
+      "id": "<task-id>",
+      "contextId": "ctx-1",
+      "status": { "state": "TASK_STATE_COMPLETED" },
+      "artifacts": [
+        {
+          "artifactId": "<artifact-id>",
+          "name": "Answer",
+          "parts": [{ "text": "Today you have 3 meetings: ..." }]
+        }
+      ]
+    }
+  }
+}
 ```
-data: {"jsonrpc":"2.0","id":"...","result":{"status":{"state":"working","message":{"parts":[{"kind":"text","text":"You"}]}},"contextId":"ctx-1"}}
-data: {"jsonrpc":"2.0","id":"...","result":{"status":{"state":"working","message":{"parts":[{"kind":"text","text":"You have"}]}},"contextId":"ctx-1"}}
-data: {"jsonrpc":"2.0","id":"...","result":{"status":{"state":"completed","message":{"parts":[{"kind":"text","text":"You have 3 meetings..."}]}},"contextId":"ctx-1"}}
-```
 
-Text accumulates across events (not incremental deltas). The sample diffs against the previous text to print only new content.
+### Streaming responses
 
-### Key v0.3 protocol details
+Streaming (`SendStreamingMessage` over SSE) is **coming soon** and not yet supported by this sample.
 
-- **JSON-RPC envelope required**: Every request must include `jsonrpc`, `id`, `method`, `params`
-- **POST to base URL**: The method (`message/send`, `message/stream`) is inside the body, not in the URL path
-- **`kind` discriminators required**: Messages need `"kind": "message"`, parts need `"kind": "text"` — server rejects without these
+### Key v1.0 protocol details
+
+- **JSON-RPC envelope required** — every request must include `jsonrpc`, `id`, `method`, `params`.
+- **POST to base URL** — the method (`SendMessage`) is inside the body, not in the URL path.
+- **No `kind` discriminators** — parts are flat objects with field-presence (`{"text": "..."}` not `{"kind": "text", "text": "..."}`).
+- **PROTOJSON enums** — roles use `ROLE_USER` / `ROLE_AGENT`; states use `TASK_STATE_WORKING` / `TASK_STATE_COMPLETED` / `TASK_STATE_FAILED` / etc.
+- **Named result wrappers** — sync responses carry `result.task` or `result.message`.
+- **Backward compatibility** — set the `A2A-Version: 0.3` request header to opt back into the v0.3 wire format.
 
 ## NuGet dependencies
 
@@ -216,7 +210,6 @@ That's it — no A2A SDK, no JWT decoder.
 
 | Symptom | Fix |
 |---------|-----|
-| `400 Invalid request, no valid route` | Your `--endpoint` path doesn't match a gateway-registered scope. Use `/a2a/` for the Work IQ Gateway. |
 | `401 Unauthorized` | Token `aud` doesn't match the endpoint. The Work IQ Gateway needs `api://workiq.svc.cloud.microsoft/.default`. |
 | `403 Forbidden` without a scope message | User is missing the Microsoft 365 Copilot license. |
 

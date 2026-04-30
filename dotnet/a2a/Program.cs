@@ -6,10 +6,12 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using A2A;
 using Microsoft.Identity.Client;
 using Microsoft.Identity.Client.Broker;
+using WorkIQ.A2A;
 
 var config = ParseArgs(args);
 if (config == null) return;
@@ -36,23 +38,14 @@ if (config.Verbosity >= 1)
 }
 
 WireLog.Verbosity = config.Verbosity;
+WireLog.ShowWire = config.ShowWire;
 var httpClient = CreateHttpClient(token, config.Gateway);
-
-// --list-agents: GET {endpoint}/.agents and print, then exit. The endpoint
-// is a Work IQ / Sydney extension (not part of the A2A spec) returning an
-// array of {agentId, name, provider} entries.
-if (config.ListAgents)
-{
-    await ListAgentsAsync(config.Gateway.Endpoint, httpClient);
-    return;
-}
 
 // Resolve the A2A target URL.
 //   --agent-id not set: post directly to the gateway endpoint (default agent for that gateway).
 //   --agent-id set:     fetch the agent card from {gateway}/{agentId}/.well-known/agent-card.json
 //                       (handled by A2ACardResolver) and use agentCard.Url as the A2A endpoint.
 string a2aEndpoint = config.Gateway.Endpoint;
-bool effectiveStream = config.Stream;
 if (!string.IsNullOrEmpty(config.AgentId))
 {
     var gateway = config.Gateway.Endpoint.TrimEnd('/');
@@ -66,20 +59,16 @@ if (!string.IsNullOrEmpty(config.AgentId))
         return;
     }
 
-    a2aEndpoint = agentCard.Url;
-    if (config.Stream && !agentCard.Capabilities.Streaming)
-    {
-        if (config.Verbosity >= 1) Ink($"  note: agent '{agentCard.Name}' does not advertise streaming; falling back to sync\n", ConsoleColor.DarkYellow);
-        effectiveStream = false;
-    }
+    // v1.0: AgentCard.Url is gone; the URL lives in SupportedInterfaces[].Url.
+    var resolvedUrl = agentCard.SupportedInterfaces.FirstOrDefault()?.Url ?? config.Gateway.Endpoint;
+    a2aEndpoint = resolvedUrl;
 
     if (config.Verbosity >= 1)
     {
         Log("AGENT");
         Console.WriteLine($"  id              {config.AgentId}");
         Console.WriteLine($"  name            {agentCard.Name}");
-        Console.WriteLine($"  url             {agentCard.Url}");
-        Console.WriteLine($"  streaming       {agentCard.Capabilities.Streaming}");
+        Console.WriteLine($"  url             {resolvedUrl}");
     }
 }
 
@@ -88,7 +77,7 @@ string? contextId = null;
 
 if (config.Verbosity >= 1)
 {
-    Log($"READY — {config.Gateway.Name} — {(effectiveStream ? "Streaming" : "Sync")} — {a2aEndpoint}");
+    Log($"READY — {config.Gateway.Name} — {a2aEndpoint}");
     Console.WriteLine("Type a message. 'quit' to exit.\n");
 }
 
@@ -115,12 +104,12 @@ while (true)
     spinner.Start();
     try
     {
-        var msg = new AgentMessage
+        var msg = new Message
         {
-            Role = MessageRole.User,
+            Role = Role.User,
             MessageId = Guid.NewGuid().ToString(),
             ContextId = contextId,
-            Parts = [new TextPart { Text = input }],
+            Parts = [Part.FromText(input)],
             Metadata = new Dictionary<string, JsonElement>
             {
                 ["Location"] = JsonSerializer.SerializeToElement(new { timeZoneOffset = (int)TimeZoneInfo.Local.BaseUtcOffset.TotalMinutes, timeZone = TimeZoneInfo.Local.Id }),
@@ -130,67 +119,13 @@ while (true)
         var sw = Stopwatch.StartNew();
         Dictionary<string, JsonElement>? responseMetadata = null;
 
-        if (effectiveStream)
-        {
-            var previousText = string.Empty;
-            await foreach (var sseItem in a2a.SendMessageStreamingAsync(new MessageSendParams { Message = msg }))
-            {
-                if (sseItem.Data is TaskStatusUpdateEvent statusUpdate)
-                {
-                    if (statusUpdate.Status.Message is AgentMessage agentMsg)
-                    {
-                        contextId = agentMsg.ContextId;
-                        responseMetadata = agentMsg.Metadata;
-
-                        // -v 1+: show A2A event details (state, part types, sizes)
-                        if (config.Verbosity >= 1)
-                        {
-                            var parts = agentMsg.Parts.Select(p => p switch
-                            {
-                                TextPart tp => $"TextPart({tp.Text?.Length ?? 0}c)",
-                                DataPart dp => $"DataPart",
-                                FilePart fp => $"FilePart({fp.File?.Name ?? "?"})",
-                                _ => p.GetType().Name
-                            });
-                            Ink($"  [{statusUpdate.Status.State}] {string.Join(" + ", parts)}\n", ConsoleColor.DarkGray);
-                        }
-
-                        var combined = string.Join("", agentMsg.Parts.OfType<TextPart>().Select(p => p.Text));
-                        spinner.Stop();
-
-                        // Print text delta
-                        if (combined.StartsWith(previousText, StringComparison.Ordinal))
-                        {
-                            Console.Write(combined[previousText.Length..]);
-                            previousText = combined;
-                        }
-                        else
-                        {
-                            Console.Write(combined);
-                            previousText = combined;
-                        }
-                    }
-
-                    if (statusUpdate.Final || statusUpdate.Status.State == TaskState.Completed)
-                    {
-                        break;
-                    }
-                }
-            }
-
-            sw.Stop();
-            Console.WriteLine();
-        }
-        else
-        {
-            var response = await a2a.SendMessageAsync(new MessageSendParams { Message = msg });
-            sw.Stop();
-            spinner.Stop();
-            var (text, ctx, meta) = Extract(response);
-            contextId = ctx;
-            responseMetadata = meta;
-            Console.WriteLine(text);
-        }
+        var response = await a2a.SendMessageAsync(new SendMessageRequest { Message = msg });
+        sw.Stop();
+        spinner.Stop();
+        var (text, ctx, meta) = Extract(response);
+        contextId = ctx;
+        responseMetadata = meta;
+        Console.WriteLine(text);
 
         if (config.Verbosity >= 1) Ink($"  ({sw.ElapsedMilliseconds} ms)\n", ConsoleColor.DarkGray);
 
@@ -209,7 +144,7 @@ while (true)
 
 // ── Core helpers ─────────────────────────────────────────────────────────
 
-static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(object response)
+static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(SendMessageResponse response)
     => WorkIQ.A2A.Helpers.Extract(response);
 
 static HttpClient CreateHttpClient(string bearerToken, GatewayConfig gw)
@@ -223,58 +158,6 @@ static HttpClient CreateHttpClient(string bearerToken, GatewayConfig gw)
     }
 
     return client;
-}
-
-static async Task ListAgentsAsync(string endpoint, HttpClient httpClient)
-{
-    var url = new Uri($"{endpoint.TrimEnd('/')}/.agents");
-    HttpResponseMessage response;
-    try { response = await httpClient.GetAsync(url); }
-    catch (Exception ex)
-    {
-        Ink($"ERROR: failed to GET {url}: {ex.Message}\n", ConsoleColor.Red);
-        return;
-    }
-
-    if (!response.IsSuccessStatusCode)
-    {
-        var body = await response.Content.ReadAsStringAsync();
-        Ink($"ERROR: {(int)response.StatusCode} {response.ReasonPhrase} from {url}\n", ConsoleColor.Red);
-        if (!string.IsNullOrWhiteSpace(body)) Console.Error.WriteLine($"  {body.Trim()}");
-        return;
-    }
-
-    var json = await response.Content.ReadAsStringAsync();
-    using var doc = JsonDocument.Parse(json);
-    if (doc.RootElement.ValueKind != JsonValueKind.Array)
-    {
-        Ink($"ERROR: expected JSON array from {url}, got {doc.RootElement.ValueKind}\n", ConsoleColor.Red);
-        return;
-    }
-
-    var agents = doc.RootElement.EnumerateArray()
-        .Select(e => (
-            Id: e.TryGetProperty("agentId", out var id) ? id.GetString() ?? "" : "",
-            Name: e.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "",
-            Provider: e.TryGetProperty("provider", out var p) ? p.GetString() ?? "" : ""))
-        .ToList();
-
-    Console.WriteLine();
-    Console.WriteLine($"Agents at {endpoint}:");
-    Console.WriteLine();
-    if (agents.Count == 0)
-    {
-        Console.WriteLine("  (none)");
-        return;
-    }
-
-    int wId = Math.Max(8, agents.Max(a => a.Id.Length));
-    int wName = Math.Max(4, agents.Max(a => a.Name.Length));
-    Ink($"  {"AGENT ID".PadRight(wId)}  {"NAME".PadRight(wName)}  PROVIDER\n", ConsoleColor.DarkGray);
-    foreach (var a in agents)
-        Console.WriteLine($"  {a.Id.PadRight(wId)}  {a.Name.PadRight(wName)}  {a.Provider}");
-    Console.WriteLine();
-    Console.WriteLine($"{agents.Count} agent{(agents.Count == 1 ? "" : "s")}.");
 }
 
 // ── WAM auth ─────────────────────────────────────────────────────────────
@@ -333,6 +216,13 @@ static async Task<(string token, IPublicClientApplication app, IAccount? account
 }
 
 // ── Token decode ─────────────────────────────────────────────────────────
+//
+// DO NOT DECODE ACCESS TOKENS IN A PRODUCTION APP — Entra defines access
+// tokens as opaque to clients (only the resource / audience may parse them),
+// and their format may change with no notice. We decode here purely as a
+// developer convenience to surface aud/scp/expiry while you're getting the
+// sample running. In your own client, treat the token as a bearer string
+// and let the resource service validate it.
 
 static void DecodeToken(string token)
 {
@@ -354,6 +244,42 @@ static void DecodeToken(string token)
 
 // ── Args ─────────────────────────────────────────────────────────────────
 
+static void PrintUsage()
+{
+    Console.WriteLine("""
+        WorkIQ A2A Sample — Interactive A2A agent session against the Work IQ Gateway
+
+        Usage: dotnet run -- --token <JWT|WAM> --appid <clientId> [options]
+
+        Auth:
+          --token, -t      Bearer token or 'WAM' for Windows broker auth
+          --appid, -a      App client ID (required with WAM)
+          --account        Account hint (e.g. user@contoso.com)
+          --tenant, -T     Tenant ID or domain (required with WAM for single-tenant apps;
+                           defaults to 'common' for multi-tenant apps)
+
+        Options:
+          --agent-id, -A   Invoke a specific agent. The sample fetches the agent card
+                           from {gateway}/{agent-id}/.well-known/agent-card.json and
+                           uses agentCard.url as the A2A endpoint. Without --agent-id,
+                           the sample posts to the gateway endpoint directly (the
+                           gateway's default agent).
+          --header, -H     Custom HTTP header in 'Key: Value' format (repeatable)
+          --show-token     Print the raw JWT token (for reuse with --token)
+          --show-wire      Pretty-print raw JSON-RPC request/response bodies.
+                           Independent of --verbosity.
+          -v, --verbosity  0 = response only, 1 = default, 2 = wire diagnostics
+
+        Note: streaming responses are coming soon and not yet supported by this sample.
+
+        Examples:
+          dotnet run -- --token WAM --appid <your-app-id> --tenant <your-tenant>
+          dotnet run -- --token WAM --appid <your-app-id> --account user@contoso.com
+          dotnet run -- --token WAM --appid <your-app-id> --agent-id <AGENT_ID>
+          dotnet run -- --token eyJ0eXAi...
+        """);
+}
+
 static Config? ParseArgs(string[] args)
 {
     var a = WorkIQ.A2A.Helpers.ParseArgs(args);
@@ -361,49 +287,18 @@ static Config? ParseArgs(string[] args)
     if (a.Error != null)
     {
         Ink($"ERROR: {a.Error}\n", ConsoleColor.Red);
+        PrintUsage();
         return null;
     }
 
     string? token = a.Token, appId = a.AppId, endpoint = a.Endpoint, account = a.Account, tenant = a.Tenant, agentId = a.AgentId;
-    bool showToken = a.ShowToken, stream = a.Stream, listAgents = a.ListAgents;
+    bool showToken = a.ShowToken, showWire = a.ShowWire;
     int verbosity = a.Verbosity;
     var headers = a.Headers;
 
     if (string.IsNullOrEmpty(token))
     {
-        Console.WriteLine("""
-            WorkIQ A2A Sample — Interactive A2A agent session against the Work IQ Gateway
-
-            Usage: dotnet run -- --token <JWT|WAM> --appid <clientId> [options]
-
-            Auth:
-              --token, -t      Bearer token or 'WAM' for Windows broker auth
-              --appid, -a      App client ID (required with WAM)
-              --account        Account hint (e.g. user@contoso.com)
-              --tenant, -T     Tenant ID or domain (required with WAM for single-tenant apps;
-                               defaults to 'common' for multi-tenant apps)
-
-            Options:
-              --endpoint, -e   Override the gateway host (scheme + authority only, no path).
-                               The /a2a/ path is preserved automatically.
-              --agent-id, -A   Invoke a specific agent. The sample fetches the agent card
-                               from {gateway}/{agent-id}/.well-known/agent-card.json and
-                               uses agentCard.url as the A2A endpoint. Without --agent-id,
-                               the sample posts to the gateway endpoint directly (the
-                               default BizChat agent).
-              --header, -H     Custom HTTP header in 'Key: Value' format (repeatable)
-              --show-token     Print the raw JWT token (for reuse with --token)
-              --stream         Use streaming mode (SSE via message/stream)
-              --list-agents    GET {endpoint}/.agents and print, then exit (no chat loop)
-              -v, --verbosity  0 = response only, 1 = default, 2 = full wire
-
-            Examples:
-              dotnet run -- --token WAM --appid <your-app-id> --tenant <your-tenant>
-              dotnet run -- --token WAM --appid <your-app-id> --account user@contoso.com
-              dotnet run -- --token WAM --appid <your-app-id> --agent-id <AGENT_ID>
-              dotnet run -- --token WAM --appid <your-app-id> --list-agents
-              dotnet run -- --token eyJ0eXAi...
-            """);
+        PrintUsage();
         return null;
     }
 
@@ -427,7 +322,7 @@ static Config? ParseArgs(string[] args)
         gw = gw with { ExtraHeaders = [.. gw.ExtraHeaders, .. headers] };
     }
 
-    return new Config(token, appId ?? "", gw, account, tenant, agentId, showToken, verbosity, stream, listAgents);
+    return new Config(token, appId ?? "", gw, account, tenant, agentId, showToken, verbosity, showWire);
 }
 
 // ── Citations ─────────────────────────────────────────────────────────────
@@ -486,7 +381,7 @@ static void Ink(string s, ConsoleColor c) { Console.ForegroundColor = c; Console
 [DllImport("user32.dll", ExactSpelling = true)] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
 static IntPtr ConsoleWindowHandle() { var c = Win32GetConsoleWindow(); var r = GetAncestor(c, 3); return r != IntPtr.Zero ? r : c; }
 
-record Config(string Token, string AppId, GatewayConfig Gateway, string? Account, string? Tenant, string? AgentId, bool ShowToken, int Verbosity, bool Stream, bool ListAgents);
+record Config(string Token, string AppId, GatewayConfig Gateway, string? Account, string? Tenant, string? AgentId, bool ShowToken, int Verbosity, bool ShowWire);
 
 // ── Gateway definitions ──────────────────────────────────────────────────
 
@@ -507,26 +402,42 @@ class Gateways
 class WireLog : DelegatingHandler
 {
     public static int Verbosity { get; set; } = 1;
+    public static bool ShowWire { get; set; } = false;
+
+    private static readonly JsonSerializerOptions PrettyJson = new() { WriteIndented = true };
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage req, CancellationToken ct)
     {
-        if (Verbosity >= 2)
+        if (Verbosity >= 2 || ShowWire)
         {
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.WriteLine($"\n  ▶ {req.Method} {req.RequestUri}");
-            foreach (var h in req.Headers)
-                Console.WriteLine(h.Key.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
-                    ? $"    {h.Key}: Bearer ...({h.Value.First().Length}c)"
-                    : $"    {h.Key}: {string.Join(", ", h.Value)}");
+            if (Verbosity >= 2)
+            {
+                foreach (var h in req.Headers)
+                    Console.WriteLine(h.Key.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
+                        ? $"    {h.Key}: Bearer ...({h.Value.First().Length}c)"
+                        : $"    {h.Key}: {string.Join(", ", h.Value)}");
+            }
 
             if (req.Content is { } body)
             {
-                foreach (var h in body.Headers) Console.WriteLine($"    {h.Key}: {string.Join(", ", h.Value)}");
+                if (Verbosity >= 2)
+                    foreach (var h in body.Headers) Console.WriteLine($"    {h.Key}: {string.Join(", ", h.Value)}");
                 var text = await body.ReadAsStringAsync(ct);
-                Console.WriteLine($"    Body: {Trunc(text, 500)}");
+
+                if (ShowWire && IsJson(body.Headers.ContentType?.MediaType))
+                {
+                    Console.WriteLine($"    Body (raw JSON-RPC):");
+                    Console.WriteLine(Indent(PrettyJsonOrRaw(text), "      "));
+                }
+                else if (Verbosity >= 2)
+                {
+                    Console.WriteLine($"    Body: {Trunc(text, 500)}");
+                }
+
                 // Re-create content so the stream can be read again by SendAsync
-                var newContent = new StringContent(text, System.Text.Encoding.UTF8, body.Headers.ContentType?.MediaType ?? "application/json");
-                req.Content = newContent;
+                req.Content = new StringContent(text, System.Text.Encoding.UTF8, body.Headers.ContentType?.MediaType ?? "application/json");
             }
 
             Console.ResetColor();
@@ -536,16 +447,33 @@ class WireLog : DelegatingHandler
         try { res = await base.SendAsync(req, ct); }
         catch (Exception ex) { Ink($"  ◀ ERROR: {ex.Message}\n", ConsoleColor.Red); throw; }
 
-        if (Verbosity >= 2)
+        var contentType = res.Content?.Headers.ContentType?.MediaType;
+
+        if (Verbosity >= 2 || ShowWire)
         {
             Console.ForegroundColor = (int)res.StatusCode >= 400 ? ConsoleColor.Red : ConsoleColor.DarkGray;
             Console.WriteLine($"  ◀ {(int)res.StatusCode} {res.StatusCode}");
-            foreach (var h in res.Headers) Console.WriteLine($"    {h.Key}: {string.Join(", ", h.Value)}");
-            if (res.Content != null)
-                foreach (var h in res.Content.Headers) Console.WriteLine($"    {h.Key}: {string.Join(", ", h.Value)}");
+            if (Verbosity >= 2)
+            {
+                foreach (var h in res.Headers) Console.WriteLine($"    {h.Key}: {string.Join(", ", h.Value)}");
+                if (res.Content != null)
+                    foreach (var h in res.Content.Headers) Console.WriteLine($"    {h.Key}: {string.Join(", ", h.Value)}");
+            }
 
+            // Always print error bodies (even in v2-only mode).
             if ((int)res.StatusCode >= 400 && res.Content != null)
+            {
                 Console.WriteLine($"    Body: {Trunc(await res.Content.ReadAsStringAsync(ct), 1000)}");
+            }
+            // Pretty-print the full body when --show-wire.
+            else if (ShowWire && IsJson(contentType) && res.Content != null)
+            {
+                var text = await res.Content.ReadAsStringAsync(ct);
+                Console.WriteLine($"    Body (raw JSON-RPC):");
+                Console.WriteLine(Indent(PrettyJsonOrRaw(text), "      "));
+                // Re-wrap so downstream readers (like the A2A SDK) can still parse it.
+                res.Content = new StringContent(text, System.Text.Encoding.UTF8, contentType ?? "application/json");
+            }
 
             Console.ResetColor();
         }
@@ -563,6 +491,22 @@ class WireLog : DelegatingHandler
 
         return res;
     }
+
+    static bool IsJson(string? mediaType) =>
+        mediaType != null && (mediaType.Contains("json", StringComparison.OrdinalIgnoreCase));
+
+    static string PrettyJsonOrRaw(string raw)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            return JsonSerializer.Serialize(doc.RootElement, PrettyJson);
+        }
+        catch { return raw; }
+    }
+
+    static string Indent(string text, string prefix) =>
+        string.Join("\n", text.Split('\n').Select(line => prefix + line));
 
     static string Trunc(string s, int max) => s.Length <= max ? s : $"{s[..max]}...";
     static void Ink(string s, ConsoleColor c) { Console.ForegroundColor = c; Console.Write(s); Console.ResetColor(); }

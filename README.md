@@ -6,7 +6,6 @@ Sample clients for the [Work IQ](https://learn.microsoft.com/en-us/microsoft-365
 |--------|----------|----------|----------|-------------|
 | [**dotnet/a2a/**](dotnet/a2a/) | C# | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Interactive agent session using the A2A protocol over JSON-RPC |
 | [**dotnet/a2a-raw/**](dotnet/a2a-raw/) | C# | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Same, but with raw `HttpClient` + JSON (no A2A SDK) |
-| [**dotnet/rest/**](dotnet/rest/) | C# | Windows, macOS, Linux | REST | Interactive chat using the [Copilot Chat API](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview) |
 | [**rust/a2a/**](rust/a2a/) | Rust | Windows, macOS, Linux | [A2A](https://a2a-protocol.org) | Interactive agent session with device code auth and token caching |
 | [**swift/a2a/**](swift/a2a/) | Swift | iOS/iPadOS (macOS to build) | [A2A](https://a2a-protocol.org) | SwiftUI chat app with streaming responses |
 
@@ -14,9 +13,7 @@ Sample clients for the [Work IQ](https://learn.microsoft.com/en-us/microsoft-365
 
 ## Gateway
 
-All .NET samples target the **Work IQ Gateway** (`workiq.svc.cloud.microsoft`) — the dedicated entry point for Work IQ and Copilot Chat. Token audience: `api://workiq.svc.cloud.microsoft`; delegated scope: `WorkIQAgent.Ask`.
-
-> The Rust and Swift samples in this repo target Microsoft Graph today and have not been migrated yet.
+All .NET samples target the **Work IQ Gateway** (`workiq.svc.cloud.microsoft`) — the dedicated entry point for Work IQ. Delegated scope: `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask`.
 
 ---
 
@@ -25,7 +22,7 @@ All .NET samples target the **Work IQ Gateway** (`workiq.svc.cloud.microsoft`) �
 1. **Microsoft 365 Copilot license** on the test user (license propagation can take 15–30 minutes after assignment).
 2. **Entra app registration** configured in your tenant — this is a one-time setup per tenant. Details below.
 3. **Your language toolchain**:
-   - **dotnet/** samples: [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or later
+   - **dotnet/** samples: [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later
    - **rust/** samples: [Rust toolchain](https://rustup.rs/) (stable)
    - **swift/** samples: [Xcode 26+](https://developer.apple.com/xcode/) (macOS only)
 
@@ -59,7 +56,7 @@ All samples support multiple authentication methods. Choose the one that fits yo
 Uses the Windows broker for silent SSO. A browser-less sign-in popup appears on first use; subsequent calls in the same process are silent. Across `dotnet run` invocations you'll be re-prompted (the samples don't persist MSAL state across processes by default).
 
 ```bash
-cd dotnet/rest
+cd dotnet/a2a
 dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
 ```
 
@@ -75,15 +72,11 @@ cargo run -- --appid <APP_ID>
 
 ### Pre-obtained JWT token — all platforms, all samples
 
-Acquire a token externally (e.g., via `az account get-access-token`, or your own MSAL code) and pass it directly:
+Acquire a token externally (e.g. via your own MSAL code) and pass it directly:
 
 ```bash
-# Audience = Work IQ
-TOKEN=$(az account get-access-token --resource api://workiq.svc.cloud.microsoft --query accessToken -o tsv)
-dotnet run -- --token "$TOKEN"
+dotnet run -- --token "<SOME_TOKEN>"
 ```
-
-Note that tokens acquired through `az account get-access-token` carry the Azure CLI's client app ID (`04b07795-...`), not your test app. Use this for quick probes, not end-to-end client-identity validation.
 
 ---
 
@@ -95,7 +88,6 @@ Note that tokens acquired through `az account get-access-token` carry the Azure 
 | `WAM_provider_error 3399614466 / IncorrectConfiguration` | App registration missing the WAM broker redirect URI `ms-appx-web://microsoft.aad.brokerplugin/{appId}` | Ask admin to re-run setup (or add that redirect URI manually). See [`ADMIN_SETUP.md`](ADMIN_SETUP.md). |
 | Same error, but redirect URI is present | Single-tenant app + `/common` authority mismatch | Pass `--tenant <TENANT_ID>` so MSAL uses the tenant-specific authority |
 | `403 Forbidden` without a scope message | User is missing the Microsoft 365 Copilot license | Assign the license; wait 15–30 min for propagation |
-| `400 BadRequest: Invalid request, no valid route` | Using `--endpoint` with an unexpected path on the Work IQ Gateway | Pass host-only to `--endpoint` (scheme + authority, no path); samples append the correct path |
 | `400 AuthenticationError: Error authenticating with resource` | Gateway rejected the downstream auth exchange (e.g., OBO against an unconfigured downstream service) | Check the request-id in the response headers against the gateway's logs |
 | WAM re-prompts for password on every `dotnet run` | MSAL in-process cache doesn't persist across processes | Expected today. A future update may add an opt-in persistent cache. |
 | `AADSTS65001: consent required` | Admin hasn't consented to the required permissions | Ask admin to run `admin-consent` (step 6 of the setup) |
@@ -107,7 +99,6 @@ Note that tokens acquired through `az account get-access-token` carry the Azure 
 ## Resources
 
 - [Work IQ overview](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/workiq-overview)
-- [Copilot Chat API](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/api/ai-services/chat/overview)
 - [A2A protocol specification](https://a2a-protocol.org/latest/specification/)
 - [MSAL.NET documentation](https://learn.microsoft.com/en-us/entra/msal/dotnet/)
 - [`ADMIN_SETUP.md`](ADMIN_SETUP.md) — detailed admin setup guide

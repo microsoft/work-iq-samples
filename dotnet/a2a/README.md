@@ -2,7 +2,9 @@
 
 A minimal, single-file interactive client for communicating with Work IQ agents using the [Agent-to-Agent (A2A) protocol](https://a2a-protocol.org).
 
-Uses the [A2A .NET SDK](https://github.com/a2aproject/a2a-dotnet) (NuGet: [`A2A`](https://www.nuget.org/packages/A2A/)) for JSON-RPC transport. Supports both synchronous (`message/send`) and streaming (`message/stream`) modes against the **Work IQ Gateway**.
+Uses the [A2A .NET SDK](https://github.com/a2aproject/a2a-dotnet) (NuGet: [`A2A`](https://www.nuget.org/packages/A2A/)) for JSON-RPC transport. Sends synchronous (`SendMessage`) requests against the **Work IQ Gateway**.
+
+> **Streaming responses are coming soon** and not yet supported by this sample.
 
 For the lower-level sample with no SDK (raw HTTP + JSON), see [`../a2a-raw/`](../a2a-raw/).
 
@@ -25,11 +27,11 @@ The **Agent-to-Agent (A2A) Protocol** is an open standard for communication betw
      ..\..\scripts\admin-setup.ps1
      ```
    - Otherwise, hand [`../../ADMIN_SETUP.md`](../../ADMIN_SETUP.md) to your admin. They'll give you an **App ID** and **Tenant ID**.
-3. **.NET 10 SDK** or later — [download](https://dotnet.microsoft.com/download/dotnet/10.0).
+3. **.NET 8 SDK** or later — [download](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ## Quick start
 
-### Default — talk to the Work IQ Gateway's BizChat agent
+### Default — talk to the Work IQ Gateway's default agent
 
 ```bash
 dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
@@ -37,13 +39,9 @@ dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
 
 Type a message, see a response, type `quit` to exit.
 
-### Streaming mode
-
-Add `--stream` to switch from `message/send` (sync) to `message/stream` (SSE).
-
 ### Invoking a specific agent (`--agent-id`)
 
-Without `--agent-id`, the sample posts directly to the gateway endpoint (the default BizChat agent). To invoke a specific agent, pass `--agent-id <id>`:
+Without `--agent-id`, the sample posts directly to the gateway endpoint (the default agent). To invoke a specific agent, pass `--agent-id <id>`:
 
 ```bash
 dotnet run -- --token WAM --agent-id <AGENT_ID> \
@@ -53,33 +51,24 @@ dotnet run -- --token WAM --agent-id <AGENT_ID> \
 The sample then:
 
 1. Fetches the agent card from `{gateway}/{agent-id}/.well-known/agent-card.json` via the A2A SDK's `A2ACardResolver`.
-2. Reads `agentCard.url`, `agentCard.name`, `agentCard.capabilities.streaming` from the response.
+2. Reads `agentCard.url` and `agentCard.name` from the response.
 3. Uses `agentCard.url` (not the gateway endpoint) as the target for `A2AClient`.
-4. Falls back to sync mode if `--stream` is set but the agent doesn't advertise streaming (a note prints at `-v >= 1`).
 
-#### How to find an agent ID — `--list-agents`
+<a id="how-to-find-an-agent-id"></a>
+#### How to find an agent ID
 
-Pass `--list-agents` to fetch and print the gateway's agent registry. The sample GETs `{endpoint}/.agents` (a Work IQ / Sydney extension, not part of the A2A spec) and prints `{agentId, name, provider}` for each entry, then exits — no chat loop:
+Use the [WorkIQ CLI](https://www.npmjs.com/package/@microsoft/workiq) to list the agents available to your signed-in user. The list command is currently behind an `experimental` flag:
 
 ```bash
-dotnet run -- --token WAM --list-agents \
-  --appid <APP_ID> --tenant <TENANT_ID>
+npm install -g @microsoft/workiq        # or: dotnet tool install --global WorkIQ
+workiq accept-eula
+workiq config set experimental=true
+workiq list-agents
 ```
 
-Sample output:
+You can also copy the agent ID from the address bar in the [Microsoft 365 Copilot Chat website](https://m365.cloud.microsoft/chat/) — the segment after `/chat/agent/`. Treat the ID as an opaque string.
 
-```
-Agents at https://workiq.svc.cloud.microsoft/a2a/:
-
-  AGENT ID                  NAME              PROVIDER
-  bizchat-as-gpt-scenario   BizChat           Microsoft
-  researcher-v1             Researcher        Microsoft
-  ...
-
-5 agents.
-```
-
-The Work IQ default agent (BizChat-as-GPT scenario) has id `bizchat-as-gpt-scenario` — but you don't need `--agent-id` to invoke it; not specifying any agent already routes there.
+Without `--agent-id`, the sample posts to the gateway's default agent.
 
 ### With a pre-obtained JWT (any platform)
 
@@ -122,12 +111,10 @@ If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and 
 | `--appid, -a` | Entra app client ID (required with `WAM`) |
 | `--tenant, -T` | Tenant ID or domain. Required with `WAM` for single-tenant apps; defaults to `common` for multi-tenant. |
 | `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
-| `--endpoint, -e` | Override the gateway host (scheme + authority only, no path) |
-| `--agent-id, -A` | Invoke a specific agent (fetches `{gateway}/{agent-id}/.well-known/agent-card.json` and posts to `agentCard.url`) |
-| `--list-agents` | GET `{endpoint}/.agents` and print, then exit (no chat loop). Use to discover agent IDs. |
-| `--stream` | Use streaming mode (`message/stream` via SSE) |
+| `--agent-id, -A` | Invoke a specific agent (fetches `{gateway}/{agent-id}/.well-known/agent-card.json` and posts to `agentCard.url`). See [How to find an agent ID](#how-to-find-an-agent-id) above. |
+| `--show-wire` | Pretty-print raw JSON-RPC request/response bodies. Independent of `--verbosity`. Useful for protocol debugging. |
 | `--header, -H` | Custom request header (repeatable) |
-| `--show-token` | Print the raw JWT after decoding |
+| `--show-token` | Print the raw access token (use only for diagnostics — treat tokens as sensitive) |
 | `-v, --verbosity` | `0` response only, `1` default, `2` full wire |
 
 ## How it works
@@ -142,7 +129,7 @@ If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and 
 
 1. **Auth**: acquires a token via WAM or accepts a pre-obtained JWT.
 2. **A2A Client**: creates an `A2AClient` from the A2A .NET SDK pointed at the gateway endpoint.
-3. **Send**: `message/send` (sync) or `message/stream` (streaming).
+3. **Send**: `SendMessage` (sync).
 4. **Receive**: parses `AgentMessage` or `AgentTask`; extracts text parts and citations from `metadata["attributions"]`.
 5. **Multi-turn**: maintains `contextId` across turns for conversation continuity.
 
@@ -150,13 +137,13 @@ If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and 
 
 | A2A Capability | Status | Notes |
 |---------------|--------|-------|
-| `message/send` (sync) | Available | Full request/response cycle |
-| `message/stream` (SSE) | Available | Incremental streaming via `TaskStatusUpdateEvent` |
+| `SendMessage` (sync) | Available | Full request/response cycle |
+| `SendStreamingMessage` (SSE) | Coming soon | Streaming responses are not yet supported by this sample |
 | Multi-turn (`contextId`) | Available | Conversation state maintained across turns |
-| `TextPart` messages | Available | User and agent text messages |
+| Text parts (`Part.FromText`) | Available | User and agent text messages |
 | Citations | Available | Via Microsoft-specific `metadata["attributions"]` (see below) |
-| Agent card (`/.well-known/agent.json`) | Coming soon | Connect to endpoint directly for now |
-| Agent discovery / listing | Coming soon | Connects to M365 Copilot agent directly for now |
+| Agent card (`/.well-known/agent.json`) | Coming soon | Connects to the gateway endpoint directly for now |
+| Agent discovery / listing | Coming soon | Connects to the gateway's default agent directly for now |
 
 ## Citations
 
@@ -197,9 +184,10 @@ if (agentMessage.Metadata?.TryGetValue("attributions", out var attrs) == true
 
 ## A2A protocol notes
 
-- Messages use the `kind` discriminator (v0.3 format).
-- Text parts come back as `TextPart`; citations and annotations live in message `Metadata["attributions"]`.
-- The sample reconstructs the full accumulated text from streaming chunks by prefix-matching (Work IQ sends cumulative text per chunk, not deltas).
+- This sample targets **A2A v1.0** wire format: SCREAMING_SNAKE_CASE enums (`ROLE_USER`, `TASK_STATE_COMPLETED`), flat field-presence parts (no `kind` discriminator), and named result wrappers (`result.task`, `result.message`). The method name is `SendMessage`.
+- Answer text comes back in `Artifact.Parts`. `Status.Message` carries citation metadata, not the final answer text.
+- Citations and annotations live in `Status.Message.Metadata["attributions"]`. A subsequent change will move citations to a `DataPart` on the artifact (with media type `application/vnd.workiq-reference`); the sample will be updated when that ships.
+- **Streaming responses are coming soon** and not yet supported by this sample.
 
 ## Wire diagnostics
 
@@ -209,7 +197,7 @@ Use `-v 2` to see full HTTP request/response details:
   > POST https://workiq.svc.cloud.microsoft/a2a/
     Authorization: Bearer ...(3089c)
     Content-Type: application/json
-    Body: {"jsonrpc":"2.0","method":"message/send","params":{...}}
+    Body: {"jsonrpc":"2.0","id":"...","method":"SendMessage","params":{"message":{...}}}
 
   < 200 OK
     request-id: d7d0989c-...
@@ -219,19 +207,18 @@ Use `-v 2` to see full HTTP request/response details:
 
 | Package | Purpose |
 |---------|---------|
-| [`A2A`](https://www.nuget.org/packages/A2A/) (0.3.3-preview) | A2A protocol client |
+| [`A2A`](https://www.nuget.org/packages/A2A/) (1.0.0-preview2) | A2A protocol client |
 | `Microsoft.Identity.Client` | MSAL token acquisition |
 | `Microsoft.Identity.Client.Broker` | Windows WAM broker |
 | `System.IdentityModel.Tokens.Jwt` | JWT decoding for diagnostics |
 
-> **Note:** This sample uses A2A SDK v0.3.3-preview. The spec has since moved to v1.0. See the [migration guide](https://github.com/a2aproject/a2a-dotnet/blob/main/docs/migration-guide-v1.md) when upgrading.
+> **Note:** This sample uses A2A SDK **v1.0.0-preview2**. For the v0.3 → v1.0 wire-format and API delta, see the [SDK migration guide](https://github.com/a2aproject/a2a-dotnet/blob/main/docs/migration-guide-v1.md). Work IQ also accepts v0.3 wire format via the `A2A-Version: 0.3` request header.
 
 ## Sample-specific troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
-| `400 Invalid request, no valid route` against Work IQ | Pass `--endpoint` as host-only; the sample appends `/a2a/` |
-| Empty response / `[Task ... — Working]` never completes | Increase the client timeout (`Timeout = TimeSpan.FromMinutes(5)` by default in `Program.cs`). Long-running grounded queries can take 30-60s on some rings. |
+| Empty response / `[Task ... — Working]` never completes | Increase the client timeout (`Timeout = TimeSpan.FromMinutes(5)` by default in `Program.cs`). Long-running grounded queries can take 30-60s in some environments. |
 | `401 Unauthorized` | Token audience doesn't match the gateway. Check the `aud` claim in the `── TOKEN ──` block. |
 
 See the [root README](../../README.md#troubleshooting) for the full troubleshooting matrix.

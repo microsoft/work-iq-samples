@@ -9,7 +9,7 @@ namespace WorkIQ.A2ARaw;
 public record RawArgs(
     string? Endpoint, string? Token, string? AppId, string? Account,
     string? Scope, string? Tenant, string? AgentId,
-    bool Stream, bool AllHeaders, bool ListAgents, string? Error);
+    bool AllHeaders, bool ShowWire, string? Error);
 
 public static class Helpers
 {
@@ -18,7 +18,7 @@ public static class Helpers
     public static RawArgs ParseArgs(string[] args)
     {
         string? endpoint = null, token = null, appId = null, account = null, scope = null, tenant = null, agentId = null;
-        bool stream = false, allHeaders = false, listAgents = false;
+        bool allHeaders = false, showWire = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -45,34 +45,40 @@ public static class Helpers
                 case "--agent-id" or "-A":
                     if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
                     agentId = args[++i]; break;
-                case "--stream": stream = true; break;
                 case "--all-headers": allHeaders = true; break;
-                case "--list-agents": listAgents = true; break;
+                case "--show-wire": showWire = true; break;
+                case "--stream":
+                    return Err("--stream is not supported: streaming responses are coming soon to this sample. Use the sync mode (default) for now.");
                 default:
                     return Err($"Unknown flag: {args[i]}");
             }
         }
 
-        return new RawArgs(endpoint, token, appId, account, scope, tenant, agentId, stream, allHeaders, listAgents, null);
+        return new RawArgs(endpoint, token, appId, account, scope, tenant, agentId, allHeaders, showWire, null);
 
-        static RawArgs Err(string msg) => new(null, null, null, null, null, null, null, false, false, false, msg);
+        static RawArgs Err(string msg) => new(null, null, null, null, null, null, null, false, false, msg);
     }
 
-    // ── A2A response text extraction ────────────────────────────────────
+    // ── A2A v1.0 response text extraction ──────────────────────────────────
+    //
+    // Walks an unwrapped JSON-RPC `result` object and returns the answer text.
+    // The agent's answer text lives in artifacts. Status carries metadata
+    // (citations) but not the final answer text.
+    //
+    // Shapes handled:
+    //   - result.task.artifacts[].parts[text]            ← sync (typical)
+    //   - result.message.parts[text]                     ← sync, direct Message payload
 
     public static string ExtractText(JsonElement el)
     {
-        // Try direct parts
-        if (TryGetParts(el, out var text)) return text;
+        // Sync `task` payload — answer text lives in artifacts.
+        if (el.TryGetProperty("task", out var task) &&
+            TryGetArtifactsText(task, out var fromArtifacts))
+            return fromArtifacts;
 
-        // Try result.status.message.parts (task response)
-        if (el.TryGetProperty("status", out var status) &&
-            status.TryGetProperty("message", out var msg) &&
-            TryGetParts(msg, out text)) return text;
-
-        // Try result.message.parts
-        if (el.TryGetProperty("message", out var m) &&
-            TryGetParts(m, out text)) return text;
+        // Sync `message` payload (direct reply, no task).
+        if (el.TryGetProperty("message", out var m) && TryGetParts(m, out var msgText))
+            return msgText;
 
         return "";
     }
@@ -88,6 +94,23 @@ public static class Helpers
         {
             if (part.TryGetProperty("text", out var t))
                 sb.Append(t.GetString());
+        }
+
+        text = sb.ToString();
+        return text.Length > 0;
+    }
+
+    // Walks `parent.artifacts[].parts[].text` and concatenates all text content.
+    public static bool TryGetArtifactsText(JsonElement parent, out string text)
+    {
+        text = "";
+        if (!parent.TryGetProperty("artifacts", out var arts) || arts.ValueKind != JsonValueKind.Array)
+            return false;
+
+        var sb = new StringBuilder();
+        foreach (var artifact in arts.EnumerateArray())
+        {
+            if (TryGetParts(artifact, out var t)) sb.Append(t);
         }
 
         text = sb.ToString();
