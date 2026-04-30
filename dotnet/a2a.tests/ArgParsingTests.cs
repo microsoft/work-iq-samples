@@ -39,6 +39,15 @@ public class ArgParsingTests
     }
 
     [Fact]
+    public void UnknownFlag_ReturnsError()
+    {
+        var r = Helpers.ParseArgs(["--token", "t", "--stre"]);
+        Assert.NotNull(r.Error);
+        Assert.Contains("Unknown flag", r.Error);
+        Assert.Contains("--stre", r.Error);
+    }
+
+    [Fact]
     public void EndpointOverride_Captured()
     {
         var r = Helpers.ParseArgs(["--token", "t", "--endpoint", "https://custom.com/"]);

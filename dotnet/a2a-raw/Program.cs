@@ -22,7 +22,10 @@ using WorkIQ.A2ARaw;
 var parsed = Helpers.ParseArgs(args);
 if (parsed.Error != null)
 {
+    Console.ForegroundColor = ConsoleColor.Red;
     Console.Error.WriteLine($"ERROR: {parsed.Error}");
+    Console.ResetColor();
+    PrintUsage();
     return;
 }
 

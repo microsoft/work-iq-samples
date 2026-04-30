@@ -237,6 +237,42 @@ static void DecodeToken(string token)
 
 // ── Args ─────────────────────────────────────────────────────────────────
 
+static void PrintUsage()
+{
+    Console.WriteLine("""
+        WorkIQ A2A Sample — Interactive A2A agent session against the Work IQ Gateway
+
+        Usage: dotnet run -- --token <JWT|WAM> --appid <clientId> [options]
+
+        Auth:
+          --token, -t      Bearer token or 'WAM' for Windows broker auth
+          --appid, -a      App client ID (required with WAM)
+          --account        Account hint (e.g. user@contoso.com)
+          --tenant, -T     Tenant ID or domain (required with WAM for single-tenant apps;
+                           defaults to 'common' for multi-tenant apps)
+
+        Options:
+          --agent-id, -A   Invoke a specific agent. The sample fetches the agent card
+                           from {gateway}/{agent-id}/.well-known/agent-card.json and
+                           uses agentCard.url as the A2A endpoint. Without --agent-id,
+                           the sample posts to the gateway endpoint directly (the
+                           default BizChat agent).
+          --header, -H     Custom HTTP header in 'Key: Value' format (repeatable)
+          --show-token     Print the raw JWT token (for reuse with --token)
+          --show-wire      Pretty-print raw JSON-RPC request/response bodies.
+                           Independent of --verbosity.
+          -v, --verbosity  0 = response only, 1 = default, 2 = wire diagnostics
+
+        Note: streaming responses are coming soon and not yet supported by this sample.
+
+        Examples:
+          dotnet run -- --token WAM --appid <your-app-id> --tenant <your-tenant>
+          dotnet run -- --token WAM --appid <your-app-id> --account user@contoso.com
+          dotnet run -- --token WAM --appid <your-app-id> --agent-id <AGENT_ID>
+          dotnet run -- --token eyJ0eXAi...
+        """);
+}
+
 static Config? ParseArgs(string[] args)
 {
     var a = WorkIQ.A2A.Helpers.ParseArgs(args);
@@ -244,6 +280,7 @@ static Config? ParseArgs(string[] args)
     if (a.Error != null)
     {
         Ink($"ERROR: {a.Error}\n", ConsoleColor.Red);
+        PrintUsage();
         return null;
     }
 
@@ -254,38 +291,7 @@ static Config? ParseArgs(string[] args)
 
     if (string.IsNullOrEmpty(token))
     {
-        Console.WriteLine("""
-            WorkIQ A2A Sample — Interactive A2A agent session against the Work IQ Gateway
-
-            Usage: dotnet run -- --token <JWT|WAM> --appid <clientId> [options]
-
-            Auth:
-              --token, -t      Bearer token or 'WAM' for Windows broker auth
-              --appid, -a      App client ID (required with WAM)
-              --account        Account hint (e.g. user@contoso.com)
-              --tenant, -T     Tenant ID or domain (required with WAM for single-tenant apps;
-                               defaults to 'common' for multi-tenant apps)
-
-            Options:
-              --agent-id, -A   Invoke a specific agent. The sample fetches the agent card
-                               from {gateway}/{agent-id}/.well-known/agent-card.json and
-                               uses agentCard.url as the A2A endpoint. Without --agent-id,
-                               the sample posts to the gateway endpoint directly (the
-                               default BizChat agent).
-              --header, -H     Custom HTTP header in 'Key: Value' format (repeatable)
-              --show-token     Print the raw JWT token (for reuse with --token)
-              --show-wire      Pretty-print raw JSON-RPC request/response bodies.
-                               Independent of --verbosity.
-              -v, --verbosity  0 = response only, 1 = default, 2 = wire diagnostics
-
-            Note: streaming responses are coming soon and not yet supported by this sample.
-
-            Examples:
-              dotnet run -- --token WAM --appid <your-app-id> --tenant <your-tenant>
-              dotnet run -- --token WAM --appid <your-app-id> --account user@contoso.com
-              dotnet run -- --token WAM --appid <your-app-id> --agent-id <AGENT_ID>
-              dotnet run -- --token eyJ0eXAi...
-            """);
+        PrintUsage();
         return null;
     }
 
