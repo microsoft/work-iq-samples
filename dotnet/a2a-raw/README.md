@@ -17,7 +17,7 @@ Use this sample when you want to understand the A2A protocol at the HTTP level, 
 | **Dependencies** | A2A NuGet SDK + MSAL | MSAL only |
 | **Protocol handling** | SDK manages JSON-RPC, SSE parsing, types | Raw `HttpClient` + `JsonDocument` |
 | **Lines of code** | ~480 | ~280 |
-| **Recommended for** | Any .NET integration with Work IQ | Reading the protocol on the wire; reference for porting to languages without an A2A SDK. **Not intended for production use.** |
+| **Recommended for** | Any .NET integration with Work IQ | Reading the protocol on the wire; reference for porting to languages without an A2A SDK |
 
 ## Prerequisites
 
