@@ -133,17 +133,6 @@ The developer will use these in the sample's `--appid` and `--tenant` flags.
 
 ---
 
-## Sample-specific scripts (already in the repo)
-
-Two folders contain their own setup helpers for language-specific reasons:
-
-- **`rust/a2a/setup-app-registration.sh`** — setup for the Rust device-code sample (Graph-targeted; no WAM, no redirect URIs).
-- **`swift/a2a/setup-app-registration.sh`** — Graph-targeted; adds an iOS-specific redirect URI (`msauth.app.blueglass.A2A-Chat://auth`) and generates `Configuration.plist`.
-
-The unified `scripts/admin-setup.sh` above is for the .NET samples (Work IQ Gateway). The Rust and Swift samples target Microsoft Graph and use their own scripts.
-
----
-
 ## Troubleshooting
 
 | Problem | Fix |
