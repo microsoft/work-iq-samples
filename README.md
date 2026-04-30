@@ -73,18 +73,6 @@ cargo run -- --appid <APP_ID>
 # Follow the on-screen instructions to authenticate in a browser.
 ```
 
-### Pre-obtained JWT token — all platforms, all samples
-
-Acquire a token externally (e.g., via `az account get-access-token`, or your own MSAL code) and pass it directly:
-
-```bash
-# Audience = Work IQ
-TOKEN=$(az account get-access-token --resource api://workiq.svc.cloud.microsoft --query accessToken -o tsv)
-dotnet run -- --token "$TOKEN"
-```
-
-Note that tokens acquired through `az account get-access-token` carry the Azure CLI's client app ID (`04b07795-...`), not your test app. Use this for quick probes, not end-to-end client-identity validation.
-
 ---
 
 ## Troubleshooting
