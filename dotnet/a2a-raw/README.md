@@ -141,7 +141,7 @@ You > quit
 | `--appid, -a` | Entra app client ID (required with `WAM`) |
 | `--tenant, -T` | Tenant ID or domain. Required with `WAM` for single-tenant apps; defaults to `common` for multi-tenant. |
 | `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
-| `--agent-id, -A` | Invoke a specific agent (fetches `.well-known/agent-card.json` and POSTs to `agentCard.url`) |
+| `--agent-id, -A` | Invoke a specific agent (fetches `.well-known/agent-card.json` and POSTs to `agentCard.url`). See [*How to find an agent ID*](#how-to-find-an-agent-id) above. |
 | `--show-wire` | Pretty-print raw JSON-RPC request/response bodies and each streaming SSE `data:` event as it arrives. Useful for protocol debugging. |
 | `--stream` | Use streaming mode (`SendStreamingMessage` via SSE) |
 | `--all-headers` | Print every response header (default: only diagnostic ones) |
