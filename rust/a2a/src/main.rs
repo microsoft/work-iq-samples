@@ -93,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
             io::stdout().flush()?;
         }
 
-        let spinner = Spinner::start();
+        let mut spinner = Spinner::start();
         let message = build_message(Role::User, input, context_id.clone());
         let send_config = Some(SendMessageConfiguration {
             accepted_output_modes: Some(vec!["text/plain".to_string()]),
@@ -103,7 +103,7 @@ async fn main() -> anyhow::Result<()> {
         });
 
         let started = Instant::now();
-        let result = handle_sync(&client, message, send_config, &mut context_id, &spinner).await;
+        let result = handle_sync(&client, message, send_config, &mut context_id, &mut spinner).await;
 
         spinner.stop();
         match result {
@@ -227,7 +227,7 @@ async fn handle_sync(
     message: Message,
     config: Option<SendMessageConfiguration>,
     context_id: &mut Option<String>,
-    spinner: &Spinner,
+    spinner: &mut Spinner,
 ) -> anyhow::Result<Option<serde_json::Value>> {
     let result = client.send_message(message, config).await?;
     spinner.stop();
@@ -394,8 +394,11 @@ impl Spinner {
         Self { running, handle: Some(handle) }
     }
 
-    fn stop(&self) {
+    fn stop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
     }
 }
 

@@ -291,13 +291,6 @@ async fn setup_broker(app: &PublicClientApplication, authority: &str) {
         }
     }
 
-    #[cfg(target_os = "windows")]
-    {
-        if let Ok(broker) = msal::broker::wam::WamBroker::with_authority(authority).await {
-            app.set_broker(Box::new(broker)).await;
-        }
-    }
-
     // Suppress unused variable warning on platforms without broker support
     let _ = (app, authority);
 }
