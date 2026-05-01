@@ -2,13 +2,12 @@ mod a2a;
 mod auth;
 mod config;
 
-use a2a::WorkIQClient;
-use a2a_rs_core::{Message, Part, Role, SendMessageConfiguration, SendMessageResult, StreamingMessageResult};
+use a2a::{build_http_client, WorkIQClient};
+use a2a_rs_core::{Message, Part, Role, SendMessageConfiguration, SendMessageResult};
 use auth::{decode_token, AuthManager};
 use clap::Parser;
 use colored::Colorize;
 use config::{Cli, Command, WORKIQ_AUTHORITY, WORKIQ_ENDPOINT, WORKIQ_SCOPES};
-use futures_util::StreamExt;
 
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,45 +18,142 @@ use std::time::Instant;
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let verbosity = cli.verbosity;
-
     let app_id = cli.appid.clone().unwrap_or_default();
 
-    fn require_app_id(app_id: &str) -> anyhow::Result<()> {
-        if app_id.is_empty() {
-            anyhow::bail!("--appid is required (or set WORKIQ_APP_ID)");
-        }
-        Ok(())
+    // ── Subcommands (login / logout / status) ────────────────────────
+    if let Some(cmd) = &cli.command {
+        require_app_id(&app_id)?;
+        return run_subcommand(cmd, &app_id, &cli).await;
     }
 
-    // ── Handle subcommands ───────────────────────────────────────────
-    match cli.command {
-        Some(Command::Login) => {
-            require_app_id(&app_id)?;
+    // ── Resolve token for REPL ───────────────────────────────────────
+    let (mut token, mut auth_mgr) = if let Some(raw) = cli.token.clone() {
+        (raw, None)
+    } else {
+        require_app_id(&app_id)?;
+        let mut mgr =
+            AuthManager::new(&app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, cli.account.as_deref()).await?;
+        let token = mgr.get_token(verbosity).await?;
+        (token, Some(mgr))
+    };
+
+    if verbosity >= 1 {
+        log_header("TOKEN");
+        decode_token(&token);
+        if cli.show_token {
+            println!("\n  {token}\n");
+        }
+    }
+
+    // ── HTTP + A2A client ────────────────────────────────────────────
+    let http = build_http_client(&cli.headers)?;
+    let mut client = WorkIQClient::new(WORKIQ_ENDPOINT, http, &token)?;
+    let mut context_id: Option<String> = None;
+
+    if verbosity >= 1 {
+        log_header(&format!("READY — Work IQ Gateway — {WORKIQ_ENDPOINT}"));
+        if let Some(mgr) = auth_mgr.as_ref() {
+            if let Some(acct) = mgr.cached_account().await {
+                println!("  Signed in as {}", acct.cyan());
+            }
+        }
+        println!("Type a message. 'quit' to exit.\n");
+    }
+
+    loop {
+        if verbosity >= 1 {
+            print!("{}", "You > ".cyan());
+            io::stdout().flush()?;
+        }
+
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input)? == 0 {
+            break;
+        }
+        let input = input.trim();
+        if input.is_empty() {
+            continue;
+        }
+        if input.eq_ignore_ascii_case("quit") || input.eq_ignore_ascii_case("exit") {
+            break;
+        }
+
+        // Silent token refresh between turns
+        if let Some(mgr) = auth_mgr.as_mut() {
+            if let Ok(fresh) = mgr.ensure_fresh(verbosity).await {
+                if fresh != token {
+                    token = fresh;
+                    client.update_token(&token);
+                }
+            }
+        }
+
+        if verbosity >= 1 {
+            print!("{}", "Agent > ".green());
+            io::stdout().flush()?;
+        }
+
+        let mut spinner = Spinner::start();
+        let message = build_message(Role::User, input, context_id.clone());
+        let send_config = Some(SendMessageConfiguration {
+            accepted_output_modes: Some(vec!["text/plain".to_string()]),
+            task_push_notification_config: None,
+            history_length: None,
+            return_immediately: None,
+        });
+
+        let started = Instant::now();
+        let result = handle_sync(&client, message, send_config, &mut context_id, &mut spinner).await;
+
+        spinner.stop();
+        match result {
+            Ok(metadata) => {
+                if verbosity >= 1 {
+                    println!("  {}", format!("({} ms)", started.elapsed().as_millis()).dimmed());
+                }
+                if let Some(meta) = metadata.as_ref() {
+                    print_citations(meta, verbosity);
+                }
+            }
+            Err(e) => eprintln!("\n  {} {e:#}", "ERROR:".red().bold()),
+        }
+
+        println!();
+    }
+
+    Ok(())
+}
+
+fn require_app_id(app_id: &str) -> anyhow::Result<()> {
+    if app_id.is_empty() {
+        anyhow::bail!("--appid is required (or set WORKIQ_APP_ID)");
+    }
+    Ok(())
+}
+
+async fn run_subcommand(cmd: &Command, app_id: &str, cli: &Cli) -> anyhow::Result<()> {
+    match cmd {
+        Command::Login => {
             let mut mgr =
-                AuthManager::new(&app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, cli.account.as_deref()).await?;
-            let token = mgr.get_token(verbosity).await?;
+                AuthManager::new(app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, cli.account.as_deref()).await?;
+            let token = mgr.get_token(cli.verbosity).await?;
             println!("\n{}", "Logged in successfully.".green().bold());
             if let Some(acct) = mgr.cached_account().await {
                 println!("  Account: {}", acct.cyan());
             }
-            if verbosity >= 1 {
+            if cli.verbosity >= 1 {
                 log_header("TOKEN");
                 decode_token(&token);
             }
-            return Ok(());
         }
-        Some(Command::Logout) => {
-            require_app_id(&app_id)?;
-            let mgr =
-                AuthManager::new(&app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, None).await?;
+        Command::Logout => {
+            let mgr = AuthManager::new(app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, None).await?;
             mgr.sign_out_all().await?;
             println!("{}", "Logged out.".green());
-            return Ok(());
         }
-        Some(Command::Status) => {
-            require_app_id(&app_id)?;
+        Command::Status => {
             let mut mgr =
-                AuthManager::new(&app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, cli.account.as_deref()).await?;
+                AuthManager::new(app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, cli.account.as_deref()).await?;
             if !mgr.has_accounts().await {
                 println!(
                     "{}",
@@ -77,180 +173,51 @@ async fn main() -> anyhow::Result<()> {
                         println!("\n  {token}\n");
                     }
                 }
-                Err(_) => {
-                    println!("  Token:     {}", "expired or unavailable".yellow());
-                }
+                Err(_) => println!("  Token:     {}", "expired or unavailable".yellow()),
             }
-            return Ok(());
-        }
-        None => {}
-    }
-
-    // ── Resolve token for REPL ───────────────────────────────────────
-    let (mut token, mut auth_mgr) = if let Some(ref raw_token) = cli.token {
-        (raw_token.clone(), None)
-    } else {
-        require_app_id(&app_id)?;
-        let mut mgr =
-            AuthManager::new(&app_id, WORKIQ_SCOPES, WORKIQ_AUTHORITY, cli.account.as_deref()).await?;
-        let token = mgr.get_token(verbosity).await?;
-        (token, Some(mgr))
-    };
-
-    // ── Display token info ───────────────────────────────────────────
-    if verbosity >= 1 {
-        log_header("TOKEN");
-        decode_token(&token);
-        if cli.show_token {
-            println!("\n  {token}\n");
         }
     }
-
-    // ── Set up A2A client ────────────────────────────────────────────
-    let endpoint = cli.endpoint.as_deref().unwrap_or(WORKIQ_ENDPOINT);
-    let mut client = WorkIQClient::new(endpoint, &token, &cli.headers)?;
-    let mut context_id: Option<String> = None;
-
-    if verbosity >= 1 {
-        let mode = if cli.stream { "Streaming" } else { "Sync" };
-        log_header(&format!("READY — Graph RP — {mode} — {endpoint}"));
-        if let Some(ref mgr) = auth_mgr {
-            if let Some(acct) = mgr.cached_account().await {
-                println!("  Signed in as {}", acct.cyan());
-            }
-        }
-        println!("Type a message. 'quit' to exit.\n");
-    }
-
-    // ── Interactive REPL ─────────────────────────────────────────────
-    loop {
-        if verbosity >= 1 {
-            print!("{}", "You > ".cyan());
-            io::stdout().flush()?;
-        }
-
-        let mut input = String::new();
-        if io::stdin().read_line(&mut input)? == 0 {
-            break;
-        }
-        let input = input.trim();
-        if input.is_empty() {
-            continue;
-        }
-        if input.eq_ignore_ascii_case("quit") || input.eq_ignore_ascii_case("exit") {
-            break;
-        }
-
-        // Silent token refresh
-        if let Some(ref mut mgr) = auth_mgr {
-            if let Ok(fresh_token) = mgr.ensure_fresh(verbosity).await {
-                if fresh_token != token {
-                    token = fresh_token;
-                    client.update_token(&token);
-                }
-            }
-        }
-
-        if verbosity >= 1 {
-            print!("{}", "Agent > ".green());
-            io::stdout().flush()?;
-        }
-
-        let spinner = Spinner::start();
-
-        let message = build_message(Role::User, input, context_id.clone());
-
-        let config = Some(SendMessageConfiguration {
-            accepted_output_modes: Some(vec!["text/plain".to_string()]),
-            blocking: Some(!cli.stream),
-            history_length: None,
-            push_notification_config: None,
-            return_immediately: None,
-        });
-
-        let sw = Instant::now();
-
-        if cli.stream {
-            match handle_streaming(&client, message, config, &mut context_id, verbosity, &spinner)
-                .await
-            {
-                Ok(metadata) => {
-                    spinner.stop();
-                    let elapsed = sw.elapsed().as_millis();
-                    if verbosity >= 1 {
-                        println!("  {}", format!("({elapsed} ms)").dimmed());
-                    }
-                    if let Some(ref meta) = metadata {
-                        print_citations(meta, verbosity);
-                    }
-                }
-                Err(e) => {
-                    spinner.stop();
-                    eprintln!("\n  {} {}: {}", "ERROR:".red().bold(), short_type(&e), e);
-                }
-            }
-        } else {
-            match handle_sync(&client, message, config, &mut context_id, verbosity, &spinner).await
-            {
-                Ok(metadata) => {
-                    spinner.stop();
-                    let elapsed = sw.elapsed().as_millis();
-                    if verbosity >= 1 {
-                        println!("  {}", format!("({elapsed} ms)").dimmed());
-                    }
-                    if let Some(ref meta) = metadata {
-                        print_citations(meta, verbosity);
-                    }
-                }
-                Err(e) => {
-                    spinner.stop();
-                    eprintln!("\n  {} {}: {}", "ERROR:".red().bold(), short_type(&e), e);
-                }
-            }
-        }
-
-        println!();
-    }
-
     Ok(())
 }
 
-/// Build a message with Location metadata (timezone info), matching .NET CLI.
+/// Build an A2A message with Location metadata (timezone info), matching the .NET CLI.
 fn build_message(role: Role, text: &str, context_id: Option<String>) -> Message {
     let now = chrono::Local::now();
     let offset_minutes = now.offset().local_minus_utc() / 60;
     let tz_name = iana_time_zone::get_timezone().unwrap_or_else(|_| "Unknown".to_string());
 
-    let location = serde_json::json!({
-        "timeZoneOffset": offset_minutes,
-        "timeZone": tz_name,
+    let metadata = serde_json::json!({
+        "Location": {
+            "timeZoneOffset": offset_minutes,
+            "timeZone": tz_name,
+        }
     });
-    let metadata = serde_json::json!({ "Location": location });
 
     Message {
         kind: "message".to_string(),
-        message_id: uuid_v4(),
+        message_id: message_id(),
         context_id,
         task_id: None,
         role,
-        parts: vec![Part::Text {
-            text: text.to_string(),
-            metadata: None,
-        }],
+        parts: vec![Part::text(text)],
         metadata: Some(metadata),
         extensions: vec![],
         reference_task_ids: None,
     }
 }
 
-fn uuid_v4() -> String {
+/// Generate a 32-hex-char message ID. Combines monotonic nanos with a process
+/// counter so two calls in the same nanosecond still differ.
+fn message_id() -> String {
+    use std::sync::atomic::AtomicU64;
     use std::time::{SystemTime, UNIX_EPOCH};
-    let t = SystemTime::now()
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    // Simple unique ID; not cryptographically random but sufficient for message IDs
-    format!("{:032x}", t)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{nanos:016x}{n:016x}")
 }
 
 // ── Sync handler ─────────────────────────────────────────────────────────
@@ -260,8 +227,7 @@ async fn handle_sync(
     message: Message,
     config: Option<SendMessageConfiguration>,
     context_id: &mut Option<String>,
-    _verbosity: u8,
-    spinner: &Spinner,
+    spinner: &mut Spinner,
 ) -> anyhow::Result<Option<serde_json::Value>> {
     let result = client.send_message(message, config).await?;
     spinner.stop();
@@ -276,12 +242,14 @@ fn extract_result(
 ) -> (String, Option<String>, Option<serde_json::Value>) {
     match result {
         SendMessageResult::Task(task) => {
-            let text = task
-                .status
-                .message
-                .as_ref()
-                .map(|m| join_text_parts(&m.parts))
-                .unwrap_or_else(|| format!("[Task {} — {:?}]", task.id, task.status.state));
+            // Answer text comes from artifacts. status.message carries
+            // chain-of-thought / progress and citation metadata only.
+            let text = join_artifact_text(task.artifacts.as_deref());
+            let text = if text.is_empty() {
+                format!("[Task {} — {:?}]", task.id, task.status.state)
+            } else {
+                text
+            };
             let meta = task
                 .status
                 .message
@@ -298,119 +266,17 @@ fn extract_result(
 }
 
 fn join_text_parts(parts: &[Part]) -> String {
-    parts
+    parts.iter().filter_map(Part::as_text).collect::<Vec<_>>().join("\n")
+}
+
+fn join_artifact_text(artifacts: Option<&[a2a_rs_core::Artifact]>) -> String {
+    artifacts
+        .unwrap_or(&[])
         .iter()
-        .filter_map(|p| match p {
-            Part::Text { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
+        .flat_map(|a| a.parts.iter())
+        .filter_map(Part::as_text)
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-// ── Streaming handler ────────────────────────────────────────────────────
-
-async fn handle_streaming(
-    client: &WorkIQClient,
-    message: Message,
-    config: Option<SendMessageConfiguration>,
-    context_id: &mut Option<String>,
-    verbosity: u8,
-    spinner: &Spinner,
-) -> anyhow::Result<Option<serde_json::Value>> {
-    let mut stream = client.send_message_streaming(message, config).await?;
-    let mut previous_text = String::new();
-    let mut response_metadata: Option<serde_json::Value> = None;
-
-    while let Some(result) = stream.next().await {
-        match result {
-            Ok(event) => match event {
-                StreamingMessageResult::Task(task) => {
-                    *context_id = Some(task.context_id.clone());
-                    if let Some(ref msg) = task.status.message {
-                        response_metadata = msg.metadata.clone();
-
-                        if verbosity >= 1 {
-                            print_event_details(&msg.parts, &format!("{:?}", task.status.state));
-                        }
-
-                        let combined = join_text_parts(&msg.parts);
-                        spinner.stop();
-                        print_delta(&combined, &mut previous_text);
-                    }
-                    if task.status.state.is_terminal() {
-                        break;
-                    }
-                }
-                StreamingMessageResult::Message(msg) => {
-                    response_metadata = msg.metadata.clone();
-                    let combined = join_text_parts(&msg.parts);
-                    spinner.stop();
-                    print_delta(&combined, &mut previous_text);
-                }
-                StreamingMessageResult::StatusUpdate(evt) => {
-                    *context_id = Some(evt.context_id.clone());
-                    if let Some(ref msg) = evt.status.message {
-                        response_metadata = msg.metadata.clone();
-
-                        if verbosity >= 1 {
-                            print_event_details(&msg.parts, &format!("{:?}", evt.status.state));
-                        }
-
-                        let combined = join_text_parts(&msg.parts);
-                        spinner.stop();
-                        print_delta(&combined, &mut previous_text);
-                    }
-                    if evt.status.state.is_terminal() || evt.is_final {
-                        break;
-                    }
-                }
-                StreamingMessageResult::ArtifactUpdate(evt) => {
-                    if let Some(ref name) = evt.artifact.name {
-                        print!(" [{}]", name.dimmed());
-                    }
-                    let combined = join_text_parts(&evt.artifact.parts);
-                    spinner.stop();
-                    print_delta(&combined, &mut previous_text);
-                }
-            },
-            Err(e) => {
-                spinner.stop();
-                eprintln!("\n{} {}", "Stream error:".red(), e);
-                break;
-            }
-        }
-    }
-
-    println!();
-    Ok(response_metadata)
-}
-
-/// Print only the new text since the last update (delta printing).
-fn print_delta(combined: &str, previous_text: &mut String) {
-    if combined.starts_with(previous_text.as_str()) {
-        print!("{}", &combined[previous_text.len()..]);
-    } else {
-        print!("{combined}");
-    }
-    *previous_text = combined.to_string();
-    let _ = io::stdout().flush();
-}
-
-/// Log streaming event details at verbosity >= 1 (part types and sizes).
-fn print_event_details(parts: &[Part], state: &str) {
-    let part_descs: Vec<String> = parts
-        .iter()
-        .map(|p| match p {
-            Part::Text { text, .. } => format!("TextPart({}c)", text.len()),
-            Part::Data { .. } => "DataPart".to_string(),
-            Part::File { file, .. } => {
-                let name = file.name.as_deref().unwrap_or("?");
-                format!("FilePart({name})")
-            }
-        })
-        .collect();
-    eprintln!("  {}", format!("  [{state}] {}", part_descs.join(" + ")).dimmed());
 }
 
 // ── Citations ────────────────────────────────────────────────────────────
@@ -421,95 +287,69 @@ fn print_citations(metadata: &serde_json::Value, verbosity: u8) {
         _ => return,
     };
 
-    let mut citation_count = 0u32;
-    let mut annotation_count = 0u32;
-
-    struct Citation {
-        attr_type: String,
-        source: String,
-        provider: String,
-        url: String,
-    }
-
-    let mut citations = Vec::new();
-
-    for attr in attrs {
-        let attr_type = attr
-            .get("attributionType")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let source = attr
-            .get("attributionSource")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let provider = attr
-            .get("providerDisplayName")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let url = attr
-            .get("seeMoreWebUrl")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        if attr_type.to_lowercase().contains("citation") {
-            citation_count += 1;
-        }
-        if attr_type.to_lowercase().contains("annotation") {
-            annotation_count += 1;
-        }
-
-        citations.push(Citation {
-            attr_type,
-            source,
-            provider,
-            url,
-        });
-    }
-
-    if citations.is_empty() {
-        return;
-    }
+    let citations: Vec<Citation> = attrs.iter().map(Citation::from_value).collect();
+    let n_citations = citations.iter().filter(|c| c.is_citation()).count();
+    let n_annotations = citations.iter().filter(|c| c.is_annotation()).count();
 
     if verbosity >= 1 {
         println!(
             "  {}",
-            format!("Citations: {citation_count}  Annotations: {annotation_count}").yellow()
+            format!("Citations: {n_citations}  Annotations: {n_annotations}").yellow()
         );
     }
+    if verbosity < 2 {
+        return;
+    }
 
-    if verbosity >= 2 {
-        for c in &citations {
-            let is_citation = c.attr_type.to_lowercase().contains("citation");
-            let label = if is_citation { "\u{1f4c4}" } else { "\u{1f517}" };
-            let name = if c.provider.is_empty() {
-                "(unnamed)"
-            } else {
-                &c.provider
-            };
-            if is_citation {
-                println!(
-                    "    {}",
-                    format!("{label} [{}/{}] {name}", c.attr_type, c.source).yellow()
-                );
-            } else {
-                println!(
-                    "    {}",
-                    format!("{label} [{}/{}] {name}", c.attr_type, c.source).dimmed()
-                );
-            }
-            if !c.url.is_empty() {
-                let truncated = if c.url.len() <= 120 {
-                    &c.url
-                } else {
-                    &c.url[..120]
-                };
-                println!("       {}", truncated.dimmed());
-            }
+    for c in &citations {
+        let label = if c.is_citation() { "\u{1f4c4}" } else { "\u{1f517}" };
+        let name = if c.provider.is_empty() { "(unnamed)" } else { c.provider.as_str() };
+        let header = format!("{label} [{}/{}] {name}", c.attr_type, c.source);
+        if c.is_citation() {
+            println!("    {}", header.yellow());
+        } else {
+            println!("    {}", header.dimmed());
         }
+        if !c.url.is_empty() {
+            let truncated: String = if c.url.len() <= 120 {
+                c.url.clone()
+            } else {
+                c.url.chars().take(120).collect()
+            };
+            println!("       {}", truncated.dimmed());
+        }
+    }
+}
+
+struct Citation {
+    attr_type: String,
+    source: String,
+    provider: String,
+    url: String,
+}
+
+impl Citation {
+    fn from_value(v: &serde_json::Value) -> Self {
+        let s = |k: &str| {
+            v.get(k)
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
+        Self {
+            attr_type: s("attributionType"),
+            source: s("attributionSource"),
+            provider: s("providerDisplayName"),
+            url: s("seeMoreWebUrl"),
+        }
+    }
+
+    fn is_citation(&self) -> bool {
+        self.attr_type.to_ascii_lowercase().contains("citation")
+    }
+
+    fn is_annotation(&self) -> bool {
+        self.attr_type.to_ascii_lowercase().contains("annotation")
     }
 }
 
@@ -517,17 +357,6 @@ fn print_citations(metadata: &serde_json::Value, verbosity: u8) {
 
 fn log_header(label: &str) {
     println!("\n{}", format!("── {label} ──").dimmed());
-}
-
-/// Get a short type name from an anyhow error for display.
-fn short_type(e: &anyhow::Error) -> String {
-    let debug = format!("{e:?}");
-    // Extract the first type-like token from the debug output
-    if let Some(end) = debug.find('(').or_else(|| debug.find(':')) {
-        debug[..end].trim().to_string()
-    } else {
-        "Error".to_string()
-    }
 }
 
 // ── Spinner ──────────────────────────────────────────────────────────────
@@ -539,33 +368,37 @@ struct Spinner {
 
 impl Spinner {
     fn start() -> Self {
+        const FRAMES: &[&str] = &[
+            "\u{b7}  ",
+            "\u{b7}\u{b7} ",
+            "\u{b7}\u{b7}\u{b7}",
+            " \u{b7}\u{b7}",
+            "  \u{b7}",
+            "   ",
+        ];
         let running = Arc::new(AtomicBool::new(true));
         let r = running.clone();
         let handle = std::thread::spawn(move || {
-            const FRAMES: &[&str] = &["\u{b7}  ", "\u{b7}\u{b7} ", "\u{b7}\u{b7}\u{b7}", " \u{b7}\u{b7}", "  \u{b7}", "   "];
             let mut i = 0;
             while r.load(Ordering::Relaxed) {
-                let frame = FRAMES[i % FRAMES.len()];
-                print!("{frame}");
+                print!("{}", FRAMES[i % FRAMES.len()]);
                 let _ = io::stdout().flush();
                 std::thread::sleep(std::time::Duration::from_millis(150));
-                // Move cursor back
                 print!("\x08\x08\x08");
                 let _ = io::stdout().flush();
                 i += 1;
             }
-            // Clear spinner area
             print!("   \x08\x08\x08");
             let _ = io::stdout().flush();
         });
-        Self {
-            running,
-            handle: Some(handle),
-        }
+        Self { running, handle: Some(handle) }
     }
 
-    fn stop(&self) {
+    fn stop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
     }
 }
 
@@ -582,25 +415,20 @@ impl Drop for Spinner {
 mod tests {
     use super::*;
 
-    // ── uuid_v4 ─────────────────────────────────────────────────────
+    // ── message_id ──────────────────────────────────────────────────
 
     #[test]
-    fn uuid_v4_format() {
-        let id = uuid_v4();
+    fn message_id_is_32_hex() {
+        let id = message_id();
         assert_eq!(id.len(), 32, "expected 32 hex chars, got {}", id.len());
-        assert!(
-            id.chars().all(|c| c.is_ascii_hexdigit()),
-            "non-hex char in: {id}"
-        );
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()), "non-hex char in: {id}");
     }
 
     #[test]
-    fn uuid_v4_uniqueness() {
-        let a = uuid_v4();
-        // Small sleep so the nanos-based ID advances
-        std::thread::sleep(std::time::Duration::from_millis(1));
-        let b = uuid_v4();
-        assert_ne!(a, b, "IDs should differ with a time gap");
+    fn message_id_unique_within_same_nanosecond() {
+        let a = message_id();
+        let b = message_id();
+        assert_ne!(a, b, "consecutive IDs should differ via the counter");
     }
 
     // ── build_message ───────────────────────────────────────────────
@@ -611,10 +439,7 @@ mod tests {
         assert_eq!(msg.kind, "message");
         assert_eq!(msg.role, Role::User);
         assert_eq!(msg.parts.len(), 1);
-        match &msg.parts[0] {
-            Part::Text { text, .. } => assert_eq!(text, "hello"),
-            other => panic!("expected Text part, got {other:?}"),
-        }
+        assert_eq!(msg.parts[0].as_text(), Some("hello"));
         assert!(msg.context_id.is_none());
         assert_eq!(msg.message_id.len(), 32);
     }
@@ -635,38 +460,39 @@ mod tests {
         assert!(loc.get("timeZone").is_some(), "missing timeZone");
     }
 
+    #[test]
+    fn build_message_empty_text() {
+        let msg = build_message(Role::User, "", None);
+        match &msg.parts[0] {
+            Part::Text { text, .. } => assert_eq!(text, ""),
+            other => panic!("expected Text part, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_message_special_characters() {
+        let input = "He said \"hello\"\nnew line\ttab \u{1f680} caf\u{e9}";
+        let msg = build_message(Role::User, input, None);
+        match &msg.parts[0] {
+            Part::Text { text, .. } => assert_eq!(text, input),
+            other => panic!("expected Text part, got {other:?}"),
+        }
+    }
+
     // ── join_text_parts ─────────────────────────────────────────────
 
     #[test]
     fn join_text_parts_basic() {
-        let parts = vec![
-            Part::Text {
-                text: "hello".into(),
-                metadata: None,
-            },
-            Part::Text {
-                text: "world".into(),
-                metadata: None,
-            },
-        ];
+        let parts = vec![Part::text("hello"), Part::text("world")];
         assert_eq!(join_text_parts(&parts), "hello\nworld");
     }
 
     #[test]
     fn join_text_parts_skips_non_text() {
         let parts = vec![
-            Part::Text {
-                text: "a".into(),
-                metadata: None,
-            },
-            Part::Data {
-                data: serde_json::json!({}),
-                metadata: None,
-            },
-            Part::Text {
-                text: "b".into(),
-                metadata: None,
-            },
+            Part::text("a"),
+            Part::data(serde_json::json!({})),
+            Part::text("b"),
         ];
         assert_eq!(join_text_parts(&parts), "a\nb");
     }
@@ -678,11 +504,14 @@ mod tests {
 
     #[test]
     fn join_text_parts_single() {
-        let parts = vec![Part::Text {
-            text: "only".into(),
-            metadata: None,
-        }];
+        let parts = vec![Part::text("only")];
         assert_eq!(join_text_parts(&parts), "only");
+    }
+
+    #[test]
+    fn join_text_parts_with_newlines_in_text() {
+        let parts = vec![Part::text("line1\nline2"), Part::text("line3\nline4")];
+        assert_eq!(join_text_parts(&parts), "line1\nline2\nline3\nline4");
     }
 
     // ── extract_result ──────────────────────────────────────────────
@@ -695,175 +524,187 @@ mod tests {
             context_id: Some("ctx-1".into()),
             task_id: None,
             role: Role::Agent,
-            parts: vec![Part::Text {
-                text: "response".into(),
-                metadata: None,
-            }],
-            metadata: Some(serde_json::json!({"key": "val"})),
+            parts: vec![Part::text("response")],
+            metadata: Some(serde_json::json!({"key":"val"})),
             extensions: vec![],
             reference_task_ids: None,
         };
-        let result = SendMessageResult::Message(msg);
-        let (text, ctx, meta) = extract_result(&result);
+        let (text, ctx, meta) = extract_result(&SendMessageResult::Message(msg));
         assert_eq!(text, "response");
         assert_eq!(ctx.as_deref(), Some("ctx-1"));
         assert_eq!(meta.unwrap()["key"], "val");
     }
 
-    #[test]
-    fn extract_result_from_task() {
-        let task = a2a_rs_core::Task {
+    fn artifact(id: &str, parts: Vec<Part>) -> a2a_rs_core::Artifact {
+        a2a_rs_core::Artifact {
+            artifact_id: id.into(),
+            name: None,
+            description: None,
+            parts,
+            metadata: None,
+            extensions: vec![],
+        }
+    }
+
+    fn task_with(
+        id: &str,
+        ctx: &str,
+        state: a2a_rs_core::TaskState,
+        artifacts: Option<Vec<a2a_rs_core::Artifact>>,
+        status_message: Option<Message>,
+    ) -> a2a_rs_core::Task {
+        a2a_rs_core::Task {
             kind: "task".into(),
-            id: "t1".into(),
-            context_id: "ctx-2".into(),
+            id: id.into(),
+            context_id: ctx.into(),
             status: a2a_rs_core::TaskStatus {
-                state: a2a_rs_core::TaskState::Completed,
-                message: Some(Message {
-                    kind: "message".into(),
-                    message_id: "m2".into(),
-                    context_id: None,
-                    task_id: None,
-                    role: Role::Agent,
-                    parts: vec![Part::Text {
-                        text: "done".into(),
-                        metadata: None,
-                    }],
-                    metadata: Some(serde_json::json!({"cite": true})),
-                    extensions: vec![],
-                    reference_task_ids: None,
-                }),
+                state,
+                message: status_message,
                 timestamp: None,
             },
-            artifacts: None,
+            artifacts,
             history: None,
             metadata: None,
-        };
-        let result = SendMessageResult::Task(task);
-        let (text, ctx, meta) = extract_result(&result);
-        assert_eq!(text, "done");
+        }
+    }
+
+    #[test]
+    fn extract_result_from_task_uses_artifacts() {
+        // Answer text comes from artifacts, not status.message.
+        let task = task_with(
+            "t1",
+            "ctx-2",
+            a2a_rs_core::TaskState::Completed,
+            Some(vec![artifact("a1", vec![Part::text("Answer from artifact")])]),
+            None,
+        );
+        let (text, ctx, _meta) = extract_result(&SendMessageResult::Task(task));
+        assert_eq!(text, "Answer from artifact");
         assert_eq!(ctx.as_deref(), Some("ctx-2"));
+    }
+
+    #[test]
+    fn extract_result_task_concatenates_multiple_artifacts() {
+        let task = task_with(
+            "t-multi",
+            "ctx-multi",
+            a2a_rs_core::TaskState::Completed,
+            Some(vec![
+                artifact("a1", vec![Part::text("One")]),
+                artifact("a2", vec![Part::text("Two")]),
+            ]),
+            None,
+        );
+        let (text, _, _) = extract_result(&SendMessageResult::Task(task));
+        assert_eq!(text, "One\nTwo");
+    }
+
+    #[test]
+    fn extract_result_task_picks_metadata_from_status_message() {
+        // status.message carries citation metadata even though answer text
+        // lives in artifacts.
+        let status_msg = Message {
+            kind: "message".into(),
+            message_id: "m-cite".into(),
+            context_id: None,
+            task_id: None,
+            role: Role::Agent,
+            parts: vec![],
+            metadata: Some(serde_json::json!({"cite": true})),
+            extensions: vec![],
+            reference_task_ids: None,
+        };
+        let task = task_with(
+            "t-cite",
+            "ctx-cite",
+            a2a_rs_core::TaskState::Completed,
+            Some(vec![artifact("a1", vec![Part::text("hello")])]),
+            Some(status_msg),
+        );
+        let (text, _, meta) = extract_result(&SendMessageResult::Task(task));
+        assert_eq!(text, "hello");
         assert_eq!(meta.unwrap()["cite"], true);
     }
 
     #[test]
-    fn extract_result_task_without_message() {
-        let task = a2a_rs_core::Task {
-            kind: "task".into(),
-            id: "t2".into(),
-            context_id: "ctx-3".into(),
-            status: a2a_rs_core::TaskStatus {
-                state: a2a_rs_core::TaskState::Working,
-                message: None,
-                timestamp: None,
-            },
-            artifacts: None,
-            history: None,
-            metadata: None,
-        };
-        let result = SendMessageResult::Task(task);
-        let (text, ctx, _meta) = extract_result(&result);
-        assert!(text.contains("t2"), "expected task id in fallback: {text}");
-        assert!(text.contains("Working"), "expected state in fallback: {text}");
+    fn extract_result_task_no_artifacts_returns_placeholder() {
+        // status.message text is intentionally ignored — that's chain-of-thought,
+        // not the final answer.
+        let task = task_with(
+            "t-no-art",
+            "ctx-3",
+            a2a_rs_core::TaskState::Working,
+            None,
+            None,
+        );
+        let (text, ctx, _) = extract_result(&SendMessageResult::Task(task));
+        assert!(text.contains("t-no-art"));
+        assert!(text.contains("Working"));
         assert_eq!(ctx.as_deref(), Some("ctx-3"));
     }
 
-    // ── print_delta ─────────────────────────────────────────────────
-
     #[test]
-    fn print_delta_incremental() {
-        let mut prev = String::new();
-
-        // First call — entire text is new
-        print_delta("Hello", &mut prev);
-        assert_eq!(prev, "Hello");
-
-        // Second call — only " world" is new
-        print_delta("Hello world", &mut prev);
-        assert_eq!(prev, "Hello world");
-    }
-
-    #[test]
-    fn print_delta_full_replace() {
-        let mut prev = "old text".to_string();
-        // New text doesn't start with old — prints full new text
-        print_delta("completely new", &mut prev);
-        assert_eq!(prev, "completely new");
-    }
-
-    #[test]
-    fn print_delta_empty() {
-        let mut prev = String::new();
-        print_delta("", &mut prev);
-        assert_eq!(prev, "");
-    }
-
-    // ── edge-case tests ─────────────────────────────────────────────
-
-    #[test]
-    fn build_message_empty_text() {
-        let msg = build_message(Role::User, "", None);
-        assert_eq!(msg.parts.len(), 1);
-        match &msg.parts[0] {
-            Part::Text { text, .. } => assert_eq!(text, ""),
-            other => panic!("expected Text part, got {other:?}"),
-        }
-        assert_eq!(msg.kind, "message");
-    }
-
-    #[test]
-    fn build_message_special_characters() {
-        let input = "He said \"hello\"\nnew line\ttab 🚀 café";
-        let msg = build_message(Role::User, input, None);
-        match &msg.parts[0] {
-            Part::Text { text, .. } => assert_eq!(text, input),
-            other => panic!("expected Text part, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn extract_result_from_task_completed_empty_message() {
-        let task = a2a_rs_core::Task {
-            kind: "task".into(),
-            id: "t-empty".into(),
-            context_id: "ctx-e".into(),
-            status: a2a_rs_core::TaskStatus {
-                state: a2a_rs_core::TaskState::Completed,
-                message: Some(Message {
-                    kind: "message".into(),
-                    message_id: "m-empty".into(),
-                    context_id: None,
-                    task_id: None,
-                    role: Role::Agent,
-                    parts: vec![], // no text parts
-                    metadata: None,
-                    extensions: vec![],
-                    reference_task_ids: None,
-                }),
-                timestamp: None,
-            },
-            artifacts: None,
-            history: None,
+    fn extract_result_task_status_message_text_ignored() {
+        // status.message.parts has text but artifacts is empty: answer text
+        // is empty (we don't fall back to status.message), so we get the
+        // placeholder.
+        let status_msg = Message {
+            kind: "message".into(),
+            message_id: "m-thought".into(),
+            context_id: None,
+            task_id: None,
+            role: Role::Agent,
+            parts: vec![Part::text("ignored chain-of-thought")],
             metadata: None,
+            extensions: vec![],
+            reference_task_ids: None,
         };
-        let result = SendMessageResult::Task(task);
-        let (text, ctx, _meta) = extract_result(&result);
-        assert_eq!(text, "", "empty parts should produce empty string");
-        assert_eq!(ctx.as_deref(), Some("ctx-e"));
+        let task = task_with(
+            "t-thought",
+            "ctx-thought",
+            a2a_rs_core::TaskState::Completed,
+            None,
+            Some(status_msg),
+        );
+        let (text, _, _) = extract_result(&SendMessageResult::Task(task));
+        assert!(text.contains("t-thought"));
+        assert!(text.contains("Completed"));
     }
 
     #[test]
-    fn join_text_parts_with_newlines_in_text() {
-        let parts = vec![
-            Part::Text {
-                text: "line1\nline2".into(),
-                metadata: None,
-            },
-            Part::Text {
-                text: "line3\nline4".into(),
-                metadata: None,
-            },
-        ];
-        // Parts are joined with \n, so embedded newlines are preserved alongside the separator.
-        assert_eq!(join_text_parts(&parts), "line1\nline2\nline3\nline4");
+    fn extract_result_task_data_only_artifacts_returns_placeholder() {
+        let task = task_with(
+            "t-data",
+            "ctx-data",
+            a2a_rs_core::TaskState::Completed,
+            Some(vec![artifact("a1", vec![Part::data(serde_json::json!({"k":"v"}))])]),
+            None,
+        );
+        let (text, _, _) = extract_result(&SendMessageResult::Task(task));
+        assert!(text.contains("t-data"));
+    }
+
+    // ── Citation ────────────────────────────────────────────────────
+
+    #[test]
+    fn citation_classifies_types() {
+        let v = serde_json::json!({
+            "attributionType": "DocCitation",
+            "attributionSource": "doc.pdf",
+            "providerDisplayName": "Provider",
+            "seeMoreWebUrl": "https://x"
+        });
+        let c = Citation::from_value(&v);
+        assert!(c.is_citation());
+        assert!(!c.is_annotation());
+        assert_eq!(c.url, "https://x");
+    }
+
+    #[test]
+    fn citation_handles_missing_fields() {
+        let c = Citation::from_value(&serde_json::json!({}));
+        assert!(!c.is_citation());
+        assert!(!c.is_annotation());
+        assert_eq!(c.url, "");
     }
 }
