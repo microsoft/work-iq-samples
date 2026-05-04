@@ -9,7 +9,7 @@ namespace WorkIQ.A2A;
 public record A2AArgs(
     string? Token, string? AppId, string? Endpoint, string? Account, string? Tenant,
     string? AgentId,
-    bool ShowToken, bool ShowWire,
+    bool ShowToken, bool Stream, bool ShowWire,
     int Verbosity, List<string> Headers, string? Error);
 
 public static class Helpers
@@ -19,7 +19,7 @@ public static class Helpers
     public static A2AArgs ParseArgs(string[] args)
     {
         string? token = null, appId = null, endpoint = null, account = null, tenant = null, agentId = null;
-        bool showToken = false, showWire = false;
+        bool showToken = false, stream = false, showWire = false;
         int verbosity = 1;
         var headers = new List<string>();
 
@@ -46,6 +46,7 @@ public static class Helpers
                     if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
                     agentId = args[++i]; break;
                 case "--show-token": showToken = true; break;
+                case "--stream": stream = true; break;
                 case "--show-wire": showWire = true; break;
                 case "--verbosity" or "-v":
                     if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
@@ -55,39 +56,30 @@ public static class Helpers
                 case "--header" or "-H":
                     if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
                     headers.Add(args[++i]); break;
-                case "--stream":
-                    return Err("--stream is not supported: streaming responses are coming soon to this sample. Use the sync mode (default) for now.");
                 default:
                     return Err($"Unknown flag: {args[i]}");
             }
         }
 
-        return new A2AArgs(token, appId, endpoint, account, tenant, agentId, showToken, showWire, verbosity, headers, null);
+        return new A2AArgs(token, appId, endpoint, account, tenant, agentId, showToken, stream, showWire, verbosity, headers, null);
 
-        static A2AArgs Err(string msg) => new(null, null, null, null, null, null, false, false, 1, new List<string>(), msg);
+        static A2AArgs Err(string msg) => new(null, null, null, null, null, null, false, false, false, 1, new List<string>(), msg);
     }
 
     // ── Sync response extraction (A2A SDK v1.0 SendMessageResponse) ─────
 
-    public static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(SendMessageResponse response)
+    public static (string text, string? contextId, Dictionary<string, JsonElement>? metadata) Extract(SendMessageResponse response) => response.PayloadCase switch
     {
-        switch (response.PayloadCase)
-        {
-            case SendMessageResponseCase.Message:
-            {
-                var m = response.Message!;
-                return (JoinText(m.Parts), m.ContextId, m.Metadata);
-            }
-            case SendMessageResponseCase.Task:
-            {
-                var t = response.Task!;
-                // Citations: still in Status.Message.Metadata until DataPart migration ships.
-                return (ExtractTextFromTask(t), t.ContextId, t.Status.Message?.Metadata);
-            }
-            default:
-                return ("(no response)", null, null);
-        }
-    }
+        SendMessageResponseCase.Message => (
+            JoinText(response.Message!.Parts),
+            response.Message.ContextId,
+            response.Message.Metadata),
+        SendMessageResponseCase.Task => (
+            ExtractTextFromTask(response.Task!),
+            response.Task.ContextId,
+            response.Task.Status.Message?.Metadata),    // citations: still in Status.Message.Metadata until DataPart migration ships
+        _ => ("(no response)", null, null),
+    };
 
     // The agent's answer text is delivered in Artifacts[].Parts (text parts).
     // Status.Message carries chain-of-thought / progress and metadata, not the

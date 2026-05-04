@@ -15,10 +15,11 @@ public class ArgParsingTests
     [Fact]
     public void ValidArgs_ProduceCorrectConfig()
     {
-        var r = Helpers.ParseArgs(["--token", "mytoken", "--appid", "app1"]);
+        var r = Helpers.ParseArgs(["--token", "mytoken", "--appid", "app1", "--stream"]);
         Assert.Null(r.Error);
         Assert.Equal("mytoken", r.Token);
         Assert.Equal("app1", r.AppId);
+        Assert.True(r.Stream);
     }
 
     [Fact]
@@ -27,15 +28,6 @@ public class ArgParsingTests
         var r = Helpers.ParseArgs([]);
         Assert.Null(r.Error);
         Assert.Null(r.Token);
-    }
-
-    [Fact]
-    public void StreamFlag_ReturnsComingSoonError()
-    {
-        var r = Helpers.ParseArgs(["--token", "t", "--stream"]);
-        Assert.NotNull(r.Error);
-        Assert.Contains("--stream is not supported", r.Error);
-        Assert.Contains("coming soon", r.Error);
     }
 
     [Fact]

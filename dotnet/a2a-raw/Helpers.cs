@@ -9,7 +9,7 @@ namespace WorkIQ.A2ARaw;
 public record RawArgs(
     string? Endpoint, string? Token, string? AppId, string? Account,
     string? Scope, string? Tenant, string? AgentId,
-    bool AllHeaders, bool ShowWire, string? Error);
+    bool Stream, bool AllHeaders, bool ShowWire, string? Error);
 
 public static class Helpers
 {
@@ -18,7 +18,7 @@ public static class Helpers
     public static RawArgs ParseArgs(string[] args)
     {
         string? endpoint = null, token = null, appId = null, account = null, scope = null, tenant = null, agentId = null;
-        bool allHeaders = false, showWire = false;
+        bool stream = false, allHeaders = false, showWire = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -45,29 +45,30 @@ public static class Helpers
                 case "--agent-id" or "-A":
                     if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
                     agentId = args[++i]; break;
+                case "--stream": stream = true; break;
                 case "--all-headers": allHeaders = true; break;
                 case "--show-wire": showWire = true; break;
-                case "--stream":
-                    return Err("--stream is not supported: streaming responses are coming soon to this sample. Use the sync mode (default) for now.");
                 default:
                     return Err($"Unknown flag: {args[i]}");
             }
         }
 
-        return new RawArgs(endpoint, token, appId, account, scope, tenant, agentId, allHeaders, showWire, null);
+        return new RawArgs(endpoint, token, appId, account, scope, tenant, agentId, stream, allHeaders, showWire, null);
 
-        static RawArgs Err(string msg) => new(null, null, null, null, null, null, null, false, false, msg);
+        static RawArgs Err(string msg) => new(null, null, null, null, null, null, null, false, false, false, msg);
     }
 
     // ── A2A v1.0 response text extraction ──────────────────────────────────
     //
     // Walks an unwrapped JSON-RPC `result` object and returns the answer text.
-    // The agent's answer text lives in artifacts. Status carries metadata
-    // (citations) but not the final answer text.
+    // The agent's answer is in artifacts (sync) or arrives via artifactUpdate
+    // events (streaming). Status / statusUpdate carry chain-of-thought and
+    // terminal-state metadata, not the final answer text.
     //
     // Shapes handled:
-    //   - result.task.artifacts[].parts[text]            ← sync (typical)
+    //   - result.task.artifacts[].parts[text]            ← sync
     //   - result.message.parts[text]                     ← sync, direct Message payload
+    //   - result.artifactUpdate.artifact.parts[text]     ← streaming chunk
 
     public static string ExtractText(JsonElement el)
     {
@@ -79,6 +80,11 @@ public static class Helpers
         // Sync `message` payload (direct reply, no task).
         if (el.TryGetProperty("message", out var m) && TryGetParts(m, out var msgText))
             return msgText;
+
+        // Streaming `artifactUpdate` — text from the artifact's parts.
+        if (el.TryGetProperty("artifactUpdate", out var au) &&
+            au.TryGetProperty("artifact", out var artifact) &&
+            TryGetParts(artifact, out var auText)) return auText;
 
         return "";
     }
