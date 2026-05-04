@@ -140,7 +140,49 @@ public class ExtractTextTests
         Assert.Equal("Hello world", Helpers.ExtractText(el));
     }
 
+    // ── ExtractText: result.artifactUpdate (streaming) ─────────────────
+
+    [Fact]
+    public void ExtractText_StreamingArtifactUpdate_ReturnsArtifactText()
+    {
+        var el = Parse("""
+        {
+            "artifactUpdate": {
+                "taskId": "t1",
+                "contextId": "ctx-1",
+                "artifact": {
+                    "artifactId": "a1",
+                    "parts": [{ "text": "streamed" }]
+                }
+            }
+        }
+        """);
+        Assert.Equal("streamed", Helpers.ExtractText(el));
+    }
+
     // ── ExtractText: shapes that should NOT yield answer text ──────────
+
+    [Fact]
+    public void ExtractText_StreamingStatusUpdate_ReturnsEmpty()
+    {
+        // statusUpdate is for chain-of-thought / terminal state, not the
+        // final answer text. Even when it carries a message, ExtractText
+        // returns empty — the sample handles statusUpdate explicitly in
+        // Program.cs to render thoughts in gray.
+        var el = Parse("""
+        {
+            "statusUpdate": {
+                "taskId": "t1",
+                "contextId": "ctx-1",
+                "status": {
+                    "state": "TASK_STATE_WORKING",
+                    "message": { "parts": [{ "text": "thinking..." }] }
+                }
+            }
+        }
+        """);
+        Assert.Equal("", Helpers.ExtractText(el));
+    }
 
     [Fact]
     public void ExtractText_EmptyObject_ReturnsEmpty()
