@@ -23,11 +23,6 @@ struct ChatMessageTests {
         #expect(botMsg.isUser == false)
     }
 
-    @Test func initDefaultsIsCompleteToFalse() {
-        let msg = ChatMessage(text: "test", isUser: true)
-        #expect(msg.isComplete == false)
-    }
-
     @Test func idIsUniqueAcrossInstances() {
         let msg1 = ChatMessage(text: "a", isUser: true)
         let msg2 = ChatMessage(text: "a", isUser: true)
@@ -47,13 +42,6 @@ struct ChatMessageTests {
         let msg = ChatMessage(text: "original", isUser: false)
         msg.text = "updated"
         #expect(msg.text == "updated")
-    }
-
-    @Test func isCompleteIsMutable() {
-        let msg = ChatMessage(text: "streaming…", isUser: false)
-        #expect(msg.isComplete == false)
-        msg.isComplete = true
-        #expect(msg.isComplete == true)
     }
 
     @Test func emptyTextIsAllowed() {
@@ -175,25 +163,19 @@ struct ConfigurationLoadingTests {
 struct MarkdownRenderingTests {
 
     @Test func completedMessageUsesFullMarkdown() {
-        let result = renderMarkdown(text: "**bold** text", isComplete: true)
+        let result = renderMarkdown(text: "**bold** text")
         // Full markdown should parse block-level elements (paragraphs, lists, etc.)
         #expect(result != AttributedString("**bold** text"))
     }
 
-    @Test func streamingMessageUsesInlineMarkdown() {
-        let result = renderMarkdown(text: "**bold** text", isComplete: false)
-        // Inline-only should still handle bold/italic but not block elements
-        #expect(result != AttributedString("**bold** text"))
-    }
-
     @Test func plainTextFallsBackGracefully() {
-        let result = renderMarkdown(text: "no markdown here", isComplete: false)
+        let result = renderMarkdown(text: "no markdown here")
         // Should still produce a valid AttributedString
         #expect(String(result.characters) == "no markdown here")
     }
 
     @Test func emptyStringReturnsEmptyAttributedString() {
-        let result = renderMarkdown(text: "", isComplete: true)
+        let result = renderMarkdown(text: "")
         #expect(result.characters.count == 0)
     }
 
@@ -203,7 +185,7 @@ struct MarkdownRenderingTests {
         - Item 2
         - Item 3
         """
-        let result = renderMarkdown(text: md, isComplete: true)
+        let result = renderMarkdown(text: md)
         let text = String(result.characters)
         #expect(text.contains("Item 1"))
         #expect(text.contains("Item 2"))

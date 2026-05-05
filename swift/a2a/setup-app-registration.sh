@@ -2,26 +2,30 @@
 set -euo pipefail
 
 # ── A2A Chat — Azure AD App Registration Setup ──────────────────────────
-# Creates a single-tenant app registration with the required Graph API
-# delegated permissions for the A2A Chat sample app.
+# Creates a single-tenant app registration with the iOS redirect URI and
+# the WorkIQAgent.Ask delegated permission needed by the A2A Chat app
+# against the Work IQ Gateway.
 #
 # Prerequisites: az CLI, logged in (az login)
 # Usage: ./setup-app-registration.sh
+#
+# For multi-language testing (this sample + .NET samples), run the
+# unified ../../scripts/admin-setup.sh first, then re-run this script
+# (or add the iOS redirect URI manually) — only the redirect URI is
+# iOS-specific.
 
 DISPLAY_NAME="A2A Chat"
 REDIRECT_URI="msauth.app.blueglass.A2A-Chat://auth"
 SIGN_IN_AUDIENCE="AzureADMyOrg"
-GRAPH_API="00000003-0000-0000-c000-000000000000"
 
-# Microsoft Graph delegated permission GUIDs
-USER_READ="e1fe6dd8-ba31-4d61-89e7-88639da4683d"
-SITES_READ_ALL="205e70e5-aba6-4c52-a976-6d2d46c48043"
-MAIL_READ="570282fd-fa5c-430d-a7fd-fc8dc98a9dca"
-PEOPLE_READ_ALL="b89f9189-71a5-4e70-b041-9887f0bc7e4a"
-ONLINE_MEETING_TRANSCRIPT_READ_ALL="30b87d18-ebb1-45db-97f8-82ccb1f0190c"
-CHAT_READ="f501c180-9344-439a-bca0-6cbf209fd270"
-CHANNEL_MESSAGE_READ_ALL="767156cb-16ae-4d10-8f8b-41b657c8c8c8"
-EXTERNAL_ITEM_READ_ALL="922f9392-b1b7-483c-a4be-0089be7704fb"
+# Work IQ resource app
+WORKIQ_APP_ID="fdcc1f02-fc51-4226-8753-f668596af7f7"
+WORKIQ_AGENT_ASK_SCOPE_ID="0b1715fd-f4bf-4c63-b16d-5be31f9847c2"
+WORKIQ_ENDPOINT="https://workiq.svc.cloud.microsoft/a2a/"
+WORKIQ_SCOPE="api://workiq.svc.cloud.microsoft/.default"
+
+echo "── Ensuring Work IQ service principal exists in tenant ──"
+az ad sp create --id "$WORKIQ_APP_ID" >/dev/null 2>&1 || true
 
 echo "── Creating app registration: $DISPLAY_NAME ──"
 
@@ -33,36 +37,17 @@ APP_ID=$(az ad app create \
 
 echo "   App ID: $APP_ID"
 
-echo "── Adding Graph API delegated permissions ──"
+echo "── Adding WorkIQAgent.Ask delegated permission ──"
 
-az ad app permission add --id "$APP_ID" --api "$GRAPH_API" \
-    --api-permissions \
-        "${USER_READ}=Scope" \
-        "${SITES_READ_ALL}=Scope" \
-        "${MAIL_READ}=Scope" \
-        "${PEOPLE_READ_ALL}=Scope" \
-        "${ONLINE_MEETING_TRANSCRIPT_READ_ALL}=Scope" \
-        "${CHAT_READ}=Scope" \
-        "${CHANNEL_MESSAGE_READ_ALL}=Scope" \
-        "${EXTERNAL_ITEM_READ_ALL}=Scope"
+az ad app permission add --id "$APP_ID" --api "$WORKIQ_APP_ID" \
+    --api-permissions "${WORKIQ_AGENT_ASK_SCOPE_ID}=Scope" \
+    2>/dev/null || true
 
-echo "   Permissions added:"
-echo "     - User.Read"
-echo "     - Sites.Read.All"
-echo "     - Mail.Read"
-echo "     - People.Read.All"
-echo "     - OnlineMeetingTranscript.Read.All"
-echo "     - Chat.Read"
-echo "     - ChannelMessage.Read.All"
-echo "     - ExternalItem.Read.All"
-
-echo "── Creating service principal ──"
-
+echo "── Creating service principal for the new app ──"
 az ad sp create --id "$APP_ID" --query id -o tsv > /dev/null 2>&1 || true
 
 echo "── Granting admin consent ──"
-
-GRAPH_SP_ID=$(az ad sp show --id "$GRAPH_API" --query id -o tsv)
+WORKIQ_SP_ID=$(az ad sp show --id "$WORKIQ_APP_ID" --query id -o tsv)
 APP_SP_ID=$(az ad sp show --id "$APP_ID" --query id -o tsv)
 
 az rest --method POST \
@@ -70,8 +55,8 @@ az rest --method POST \
     --body "{
         \"clientId\": \"$APP_SP_ID\",
         \"consentType\": \"AllPrincipals\",
-        \"resourceId\": \"$GRAPH_SP_ID\",
-        \"scope\": \"User.Read Sites.Read.All Mail.Read People.Read.All OnlineMeetingTranscript.Read.All Chat.Read ChannelMessage.Read.All ExternalItem.Read.All\"
+        \"resourceId\": \"$WORKIQ_SP_ID\",
+        \"scope\": \"WorkIQAgent.Ask\"
     }" -o none
 
 echo ""
@@ -91,10 +76,10 @@ cat > "$SCRIPT_DIR/A2A Chat/Configuration.plist" <<PLIST
     <string>common</string>
     <key>Scopes</key>
     <array>
-        <string>https://graph.microsoft.com/.default</string>
+        <string>$WORKIQ_SCOPE</string>
     </array>
     <key>Endpoint</key>
-    <string>YOUR_ENDPOINT_URL</string>
+    <string>$WORKIQ_ENDPOINT</string>
 </dict>
 </plist>
 PLIST

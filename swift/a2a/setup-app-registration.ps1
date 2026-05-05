@@ -1,28 +1,30 @@
 # ── A2A Chat — Azure AD App Registration Setup ──────────────────────────
-# Creates a single-tenant app registration with the required Graph API
-# delegated permissions for the A2A Chat sample app.
+# Creates a single-tenant app registration with the iOS redirect URI and
+# the WorkIQAgent.Ask delegated permission needed by the A2A Chat app
+# against the Work IQ Gateway.
 #
 # Prerequisites: az CLI, logged in (az login)
 # Usage: .\setup-app-registration.ps1
+#
+# For multi-language testing (this sample + .NET samples), run the
+# unified ..\..\scripts\admin-setup.ps1 first, then re-run this script
+# (or add the iOS redirect URI manually) — only the redirect URI is
+# iOS-specific.
 
 $ErrorActionPreference = "Stop"
 
 $DisplayName = "A2A Chat"
 $RedirectUri = "msauth.app.blueglass.A2A-Chat://auth"
 $SignInAudience = "AzureADMyOrg"
-$GraphApi = "00000003-0000-0000-c000-000000000000"
 
-# Microsoft Graph delegated permission GUIDs
-$Permissions = @{
-    "User.Read"                        = "e1fe6dd8-ba31-4d61-89e7-88639da4683d"
-    "Sites.Read.All"                   = "205e70e5-aba6-4c52-a976-6d2d46c48043"
-    "Mail.Read"                        = "570282fd-fa5c-430d-a7fd-fc8dc98a9dca"
-    "People.Read.All"                  = "b89f9189-71a5-4e70-b041-9887f0bc7e4a"
-    "OnlineMeetingTranscript.Read.All" = "30b87d18-ebb1-45db-97f8-82ccb1f0190c"
-    "Chat.Read"                        = "f501c180-9344-439a-bca0-6cbf209fd270"
-    "ChannelMessage.Read.All"          = "767156cb-16ae-4d10-8f8b-41b657c8c8c8"
-    "ExternalItem.Read.All"            = "922f9392-b1b7-483c-a4be-0089be7704fb"
-}
+# Work IQ resource app
+$WorkIqAppId = "fdcc1f02-fc51-4226-8753-f668596af7f7"
+$WorkIqAgentAskScopeId = "0b1715fd-f4bf-4c63-b16d-5be31f9847c2"
+$WorkIqEndpoint = "https://workiq.svc.cloud.microsoft/a2a/"
+$WorkIqScope = "api://workiq.svc.cloud.microsoft/.default"
+
+Write-Host "── Ensuring Work IQ service principal exists in tenant ──"
+az ad sp create --id $WorkIqAppId 2>$null | Out-Null
 
 Write-Host "── Creating app registration: $DisplayName ──"
 
@@ -34,29 +36,21 @@ $AppId = az ad app create `
 
 Write-Host "   App ID: $AppId"
 
-Write-Host "── Adding Graph API delegated permissions ──"
+Write-Host "── Adding WorkIQAgent.Ask delegated permission ──"
 
-$PermArgs = $Permissions.Values | ForEach-Object { "$_=Scope" }
+az ad app permission add --id $AppId --api $WorkIqAppId `
+    --api-permissions "$WorkIqAgentAskScopeId=Scope" 2>$null | Out-Null
 
-az ad app permission add --id $AppId --api $GraphApi `
-    --api-permissions @PermArgs
-
-foreach ($name in $Permissions.Keys | Sort-Object) {
-    Write-Host "     - $name"
-}
-
-Write-Host "── Creating service principal ──"
-
+Write-Host "── Creating service principal for the new app ──"
 az ad sp create --id $AppId --query id -o tsv 2>$null | Out-Null
 
 Write-Host "── Granting admin consent ──"
-
-$GraphSpId = az ad sp show --id $GraphApi --query id -o tsv
+$WorkIqSpId = az ad sp show --id $WorkIqAppId --query id -o tsv
 $AppSpId = az ad sp show --id $AppId --query id -o tsv
 
 az rest --method POST `
     --uri "https://graph.microsoft.com/v1.0/oauth2PermissionGrants" `
-    --body "{`"clientId`":`"$AppSpId`",`"consentType`":`"AllPrincipals`",`"resourceId`":`"$GraphSpId`",`"scope`":`"User.Read Sites.Read.All Mail.Read People.Read.All OnlineMeetingTranscript.Read.All Chat.Read ChannelMessage.Read.All ExternalItem.Read.All`"}" `
+    --body "{`"clientId`":`"$AppSpId`",`"consentType`":`"AllPrincipals`",`"resourceId`":`"$WorkIqSpId`",`"scope`":`"WorkIQAgent.Ask`"}" `
     -o none
 
 Write-Host ""
@@ -77,10 +71,10 @@ $PlistContent = @"
     <string>common</string>
     <key>Scopes</key>
     <array>
-        <string>https://graph.microsoft.com/.default</string>
+        <string>$WorkIqScope</string>
     </array>
     <key>Endpoint</key>
-    <string>YOUR_ENDPOINT_URL</string>
+    <string>$WorkIqEndpoint</string>
 </dict>
 </plist>
 "@

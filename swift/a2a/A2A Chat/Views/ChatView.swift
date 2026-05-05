@@ -100,30 +100,11 @@ struct ChatView: View {
         isWaiting = true
 
         Task {
-            var agentMessage: ChatMessage? = nil
-
             do {
-                try await a2aService.sendStreaming(text) { streamedText in
-                    if let msg = agentMessage {
-                        msg.text = streamedText
-                    } else {
-                        let msg = ChatMessage(text: streamedText, isUser: false)
-                        agentMessage = msg
-                        messages.append(msg)
-                        isWaiting = false
-                    }
-                }
-                if let msg = agentMessage {
-                    msg.isComplete = true
-                } else {
-                    messages.append(ChatMessage(text: "[No response]", isUser: false))
-                }
+                let reply = try await a2aService.send(text)
+                messages.append(ChatMessage(text: reply, isUser: false))
             } catch {
-                if let msg = agentMessage {
-                    msg.text += "\n\nError: \(error.localizedDescription)"
-                } else {
-                    messages.append(ChatMessage(text: "Error: \(error.localizedDescription)", isUser: false))
-                }
+                messages.append(ChatMessage(text: "Error: \(error.localizedDescription)", isUser: false))
             }
             isWaiting = false
         }

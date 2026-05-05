@@ -291,13 +291,6 @@ async fn setup_broker(app: &PublicClientApplication, authority: &str) {
         }
     }
 
-    #[cfg(target_os = "windows")]
-    {
-        if let Ok(broker) = msal::broker::wam::WamBroker::with_authority(authority).await {
-            app.set_broker(Box::new(broker)).await;
-        }
-    }
-
     // Suppress unused variable warning on platforms without broker support
     let _ = (app, authority);
 }
@@ -369,7 +362,7 @@ pub fn decode_token(token: &str) {
     ] {
         if let Some(val) = payload.get(claim).and_then(|v| v.as_str()) {
             if !val.is_empty() {
-                println!("  {:<16} {}", claim, val);
+                println!("  {claim:<16} {val}");
             }
         }
     }
@@ -438,11 +431,7 @@ mod tests {
     fn extract_code_missing() {
         let req = "GET /?state=xyz HTTP/1.1\r\n";
         let err = extract_code_from_request(req).unwrap_err();
-        assert!(
-            err.to_string().contains("No authorization code"),
-            "got: {}",
-            err
-        );
+        assert!(err.to_string().contains("No authorization code"), "got: {err}");
     }
 
     #[test]
