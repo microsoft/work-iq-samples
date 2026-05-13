@@ -15,11 +15,12 @@ public class ArgParsingTests
     [Fact]
     public void ValidArgs_AllParsedCorrectly()
     {
-        var r = Helpers.ParseArgs(["--endpoint", "https://example.com", "--token", "abc", "--appid", "id1"]);
+        var r = Helpers.ParseArgs(["--endpoint", "https://example.com", "--token", "abc", "--appid", "id1", "--stream"]);
         Assert.Null(r.Error);
         Assert.Equal("https://example.com", r.Endpoint);
         Assert.Equal("abc", r.Token);
         Assert.Equal("id1", r.AppId);
+        Assert.True(r.Stream);
     }
 
     [Fact]
@@ -38,15 +39,6 @@ public class ArgParsingTests
         var r = Helpers.ParseArgs(["--unknown"]);
         Assert.NotNull(r.Error);
         Assert.Contains("Unknown flag", r.Error);
-    }
-
-    [Fact]
-    public void StreamFlag_ReturnsComingSoonError()
-    {
-        var r = Helpers.ParseArgs(["--endpoint", "u", "--token", "t", "--stream"]);
-        Assert.NotNull(r.Error);
-        Assert.Contains("--stream is not supported", r.Error);
-        Assert.Contains("coming soon", r.Error);
     }
 
     [Fact]
@@ -146,4 +138,12 @@ public class ArgParsingTests
         Assert.False(r.ShowWire);
     }
 
+    [Fact]
+    public void ShowWire_CombinesWithStream()
+    {
+        var r = Helpers.ParseArgs(["-e", "https://example.com", "-t", "tok", "--show-wire", "--stream"]);
+        Assert.Null(r.Error);
+        Assert.True(r.ShowWire);
+        Assert.True(r.Stream);
+    }
 }

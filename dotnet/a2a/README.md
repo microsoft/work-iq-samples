@@ -2,9 +2,7 @@
 
 A minimal, single-file interactive client for communicating with Work IQ agents using the [Agent-to-Agent (A2A) protocol](https://a2a-protocol.org).
 
-Uses the [A2A .NET SDK](https://github.com/a2aproject/a2a-dotnet) (NuGet: [`A2A`](https://www.nuget.org/packages/A2A/)) for JSON-RPC transport. Sends synchronous (`SendMessage`) requests against the **Work IQ Gateway**.
-
-> **Streaming responses are coming soon** and not yet supported by this sample.
+Uses the [A2A .NET SDK](https://github.com/a2aproject/a2a-dotnet) (NuGet: [`A2A`](https://www.nuget.org/packages/A2A/)) for JSON-RPC transport. Supports both synchronous (`SendMessage`) and streaming (`SendStreamingMessage`) modes against the **Work IQ Gateway**.
 
 For the lower-level sample with no SDK (raw HTTP + JSON), see [`../a2a-raw/`](../a2a-raw/).
 
@@ -39,6 +37,10 @@ dotnet run -- --token WAM --appid <APP_ID> --tenant <TENANT_ID>
 
 Type a message, see a response, type `quit` to exit.
 
+### Streaming mode
+
+Add `--stream` to switch from `SendMessage` (sync) to `SendStreamingMessage` (SSE).
+
 ### Invoking a specific agent (`--agent-id`)
 
 Without `--agent-id`, the sample posts directly to the gateway endpoint (the default agent). To invoke a specific agent, pass `--agent-id <id>`:
@@ -51,8 +53,9 @@ dotnet run -- --token WAM --agent-id <AGENT_ID> \
 The sample then:
 
 1. Fetches the agent card from `{gateway}/{agent-id}/.well-known/agent-card.json` via the A2A SDK's `A2ACardResolver`.
-2. Reads `agentCard.url` and `agentCard.name` from the response.
+2. Reads `agentCard.url`, `agentCard.name`, `agentCard.capabilities.streaming` from the response.
 3. Uses `agentCard.url` (not the gateway endpoint) as the target for `A2AClient`.
+4. Falls back to sync mode if `--stream` is set but the agent doesn't advertise streaming (a note prints at `-v >= 1`).
 
 <a id="how-to-find-an-agent-id"></a>
 #### How to find an agent ID
@@ -112,7 +115,8 @@ If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and 
 | `--tenant, -T` | Tenant ID or domain. Required with `WAM` for single-tenant apps; defaults to `common` for multi-tenant. |
 | `--account` | Account hint for WAM (e.g., `user@contoso.com`) |
 | `--agent-id, -A` | Invoke a specific agent (fetches `{gateway}/{agent-id}/.well-known/agent-card.json` and posts to `agentCard.url`). See [How to find an agent ID](#how-to-find-an-agent-id) above. |
-| `--show-wire` | Pretty-print raw JSON-RPC request/response bodies. Independent of `--verbosity`. Useful for protocol debugging. |
+| `--show-wire` | Pretty-print raw JSON-RPC request/response bodies and each streaming SSE event as it arrives. Independent of `--verbosity`. Useful for protocol debugging. |
+| `--stream` | Use streaming mode (`SendStreamingMessage` via SSE) |
 | `--header, -H` | Custom request header (repeatable) |
 | `--show-token` | Print the raw access token (use only for diagnostics — treat tokens as sensitive) |
 | `-v, --verbosity` | `0` response only, `1` default, `2` full wire |
@@ -129,7 +133,7 @@ If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and 
 
 1. **Auth**: acquires a token via WAM or accepts a pre-obtained JWT.
 2. **A2A Client**: creates an `A2AClient` from the A2A .NET SDK pointed at the gateway endpoint.
-3. **Send**: `SendMessage` (sync).
+3. **Send**: `SendMessage` (sync) or `SendStreamingMessage` (streaming).
 4. **Receive**: parses `AgentMessage` or `AgentTask`; extracts text parts and citations from `metadata["attributions"]`.
 5. **Multi-turn**: maintains `contextId` across turns for conversation continuity.
 
@@ -138,7 +142,7 @@ If the `── TOKEN ──` block shows `aud` matching the Work IQ Gateway and 
 | A2A Capability | Status | Notes |
 |---------------|--------|-------|
 | `SendMessage` (sync) | Available | Full request/response cycle |
-| `SendStreamingMessage` (SSE) | Coming soon | Streaming responses are not yet supported by this sample |
+| `SendStreamingMessage` (SSE) | Available | Incremental streaming via `TaskArtifactUpdateEvent` (and `TaskStatusUpdateEvent` for chain-of-thought / terminal status) |
 | Multi-turn (`contextId`) | Available | Conversation state maintained across turns |
 | Text parts (`Part.FromText`) | Available | User and agent text messages |
 | Citations | Available | Via Microsoft-specific `metadata["attributions"]` (see below) |
@@ -184,10 +188,10 @@ if (agentMessage.Metadata?.TryGetValue("attributions", out var attrs) == true
 
 ## A2A protocol notes
 
-- This sample targets **A2A v1.0** wire format: SCREAMING_SNAKE_CASE enums (`ROLE_USER`, `TASK_STATE_COMPLETED`), flat field-presence parts (no `kind` discriminator), and named result wrappers (`result.task`, `result.message`). The method name is `SendMessage`.
-- Answer text comes back in `Artifact.Parts`. `Status.Message` carries citation metadata, not the final answer text.
+- This sample targets **A2A v1.0** wire format: SCREAMING_SNAKE_CASE enums (`ROLE_USER`, `TASK_STATE_COMPLETED`), flat field-presence parts (no `kind` discriminator), and named result wrappers (`result.task`, `result.statusUpdate`, `result.artifactUpdate`). Method names are `SendMessage` / `SendStreamingMessage`.
+- Answer text comes back in `Artifact.Parts` (sync) or via `ArtifactUpdate` events (streaming). `Status.Message` carries chain-of-thought / progress and citation metadata, not the final answer text.
 - Citations and annotations live in `Status.Message.Metadata["attributions"]`. A subsequent change will move citations to a `DataPart` on the artifact (with media type `application/vnd.workiq-reference`); the sample will be updated when that ships.
-- **Streaming responses are coming soon** and not yet supported by this sample.
+- **Streaming mode**: in the default "Delta" mode each `ArtifactUpdate` carries just the new tail with `Append = true`; the sample concatenates `Append = true` parts per `ArtifactId` to assemble the full answer.
 
 ## Wire diagnostics
 
