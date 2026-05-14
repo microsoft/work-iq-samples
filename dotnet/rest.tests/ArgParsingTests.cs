@@ -48,6 +48,15 @@ public class ArgParsingTests
     }
 
     [Fact]
+    public void UnknownArgument_ReturnsError()
+    {
+        var r = Helpers.ParseArgs(["--token", "t", "--strem"]);
+        Assert.NotNull(r.Error);
+        Assert.Contains("Unknown argument", r.Error);
+        Assert.Contains("--strem", r.Error);
+    }
+
+    [Fact]
     public void HeaderValues_AreCollected()
     {
         var r = Helpers.ParseArgs(["--token", "t", "--header", "X-Custom: value1", "-H", "X-Other: value2"]);

@@ -264,7 +264,11 @@ async Task ChatStream(HttpClient client, string convId, string message)
                 hasAttrs = true;
             }
 
-            // Print only the delta (new text since last event)
+            // Print only the delta (new text since last event).
+            // Assumes the gateway streams cumulative, append-only text — true for /chatOverStream today.
+            // If a future event ever rewrites earlier text (non-prefix update), the else branch writes
+            // the full text after the already-printed prefix, producing visible duplication. Acceptable
+            // because the contract is append-only; revisit if the server begins emitting prefix rewrites.
             if (!headerPrinted) { if (config.Verbosity >= 1) Ink("Agent > ", ConsoleColor.Green); headerPrinted = true; }
 
             if (previousText != null && text.StartsWith(previousText))
@@ -469,11 +473,8 @@ class DiagnosticHandler : DelegatingHandler
     {
         var res = await base.SendAsync(req, ct);
 
-        if (Verbosity >= 2)
-        {
-            // Full wire logging handled by LogWire at call sites
-        }
-        else if (Verbosity >= 1)
+        // At verbosity 2+, LogWire prints these headers (and more) at call sites; skip here to avoid duplicates.
+        if (Verbosity == 1)
         {
             Console.ForegroundColor = ConsoleColor.DarkGray;
             foreach (var name in new[] { "request-id", "x-ms-ags-diagnostic" })

@@ -50,6 +50,8 @@ public static class Helpers
                 case "--header" or "-H":
                     if (i + 1 >= args.Length) return Err($"Missing value for {args[i]}");
                     headers.Add(args[++i]); break;
+                default:
+                    return Err($"Unknown argument: {args[i]}");
             }
         }
 
